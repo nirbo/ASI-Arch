@@ -17,6 +17,8 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 import argparse
 import traceback
+import re
+import math
 
 # Configuration
 MAX_SEQ_LENGTH = 512
@@ -108,6 +110,119 @@ def prepare_dataset():
     except Exception as e:
         log_message(f"Error preparing dataset: {str(e)}")
         raise
+
+def prepare_reasoning_dataset():
+    """Prepare simple mathematical reasoning dataset for evaluation"""
+    try:
+        log_message("Creating simple mathematical reasoning dataset...")
+        
+        # Generate basic arithmetic problems
+        problems = []
+        for i in range(200):  # Small dataset for quick evaluation
+            a, b = torch.randint(1, 100, (2,)).tolist()
+            operation = torch.randint(0, 4, (1,)).item()
+            
+            if operation == 0:  # Addition
+                problem = f"What is {a} + {b}?"
+                answer = str(a + b)
+            elif operation == 1:  # Subtraction  
+                problem = f"What is {max(a,b)} - {min(a,b)}?"
+                answer = str(max(a,b) - min(a,b))
+            elif operation == 2:  # Multiplication
+                a, b = min(a, 20), min(b, 20)  # Keep numbers smaller
+                problem = f"What is {a} * {b}?"
+                answer = str(a * b)
+            else:  # Division
+                b = max(b, 1)
+                result = (a * b) // b  # Ensure integer division
+                problem = f"What is {a * b} / {b}?"
+                answer = str(result)
+            
+            problems.append({"problem": problem, "answer": answer})
+        
+        return problems
+        
+    except Exception as e:
+        log_message(f"Error preparing reasoning dataset: {str(e)}")
+        return []
+
+def evaluate_reasoning(model, tokenizer, problems, max_problems=50):
+    """Evaluate model on reasoning tasks"""
+    try:
+        log_message("Evaluating reasoning capabilities...")
+        
+        model.eval()
+        correct = 0
+        total = min(len(problems), max_problems)
+        
+        with torch.no_grad():
+            for i, problem_data in enumerate(problems[:total]):
+                problem = problem_data["problem"]
+                correct_answer = problem_data["answer"]
+                
+                # Tokenize problem
+                inputs = tokenizer(
+                    problem, 
+                    return_tensors="pt", 
+                    max_length=64,
+                    truncation=True,
+                    padding=True
+                ).to(DEVICE)
+                
+                try:
+                    # Generate response (simple greedy decoding)
+                    input_ids = inputs["input_ids"]
+                    
+                    # Generate a few tokens for the answer
+                    for _ in range(10):  # Max 10 tokens for answer
+                        outputs = model(input_ids)
+                        
+                        if hasattr(outputs, 'logits'):
+                            logits = outputs.logits
+                        elif isinstance(outputs, tuple):
+                            logits = outputs[0]
+                        else:
+                            logits = outputs
+                        
+                        # Get next token
+                        next_token = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+                        input_ids = torch.cat([input_ids, next_token], dim=1)
+                        
+                        # Stop if we hit end token or max length
+                        if next_token.item() == tokenizer.eos_token_id:
+                            break
+                    
+                    # Decode generated response
+                    generated_text = tokenizer.decode(
+                        input_ids[0][inputs["input_ids"].shape[1]:], 
+                        skip_special_tokens=True
+                    ).strip()
+                    
+                    # Extract numbers from generated text
+                    numbers = re.findall(r'\d+', generated_text)
+                    
+                    if numbers and numbers[0] == correct_answer:
+                        correct += 1
+                        
+                    if i < 5:  # Log first few examples
+                        log_message(f"Problem: {problem}")
+                        log_message(f"Generated: {generated_text}")
+                        log_message(f"Expected: {correct_answer}")
+                        log_message(f"Correct: {numbers[0] == correct_answer if numbers else False}")
+                        log_message("---")
+                        
+                except Exception as e:
+                    log_message(f"Error in reasoning evaluation {i}: {str(e)}")
+                    continue
+        
+        accuracy = correct / total if total > 0 else 0.0
+        log_message(f"Reasoning accuracy: {correct}/{total} = {accuracy:.2%}")
+        
+        return accuracy
+        
+    except Exception as e:
+        log_message(f"Error in reasoning evaluation: {str(e)}")
+        return 0.0
 
 def train_model(model, train_dataloader, valid_dataloader):
     """Train the model and return metrics"""
@@ -212,7 +327,7 @@ def train_model(model, train_dataloader, valid_dataloader):
         log_message(f"Traceback: {traceback.format_exc()}")
         raise
 
-def save_results(architecture_name, train_losses, valid_losses):
+def save_results(architecture_name, train_losses, valid_losses, reasoning_accuracy=0.0, reasoning_speed=0.0):
     """Save training results to CSV files"""
     try:
         log_message("Saving results...")
@@ -229,10 +344,19 @@ def save_results(architecture_name, train_losses, valid_losses):
         final_valid_loss = valid_losses[-1] if valid_losses else float('inf')
         perplexity = torch.exp(torch.tensor(final_valid_loss)).item()
         
+        # Compute composite score (lower is better)
+        # Combine language modeling (perplexity) with reasoning accuracy
+        language_score = perplexity
+        reasoning_score = 1.0 / (reasoning_accuracy + 0.01)  # Invert accuracy (lower is better)
+        composite_score = language_score + reasoning_score
+        
         benchmark_df = pd.DataFrame({
             'architecture': [architecture_name],
             'final_valid_loss': [final_valid_loss],
             'perplexity': [perplexity],
+            'reasoning_accuracy': [reasoning_accuracy],
+            'reasoning_speed': [reasoning_speed],
+            'composite_score': [composite_score],
             'num_epochs': [len(train_losses)],
             'success': [True]
         })
@@ -240,9 +364,11 @@ def save_results(architecture_name, train_losses, valid_losses):
         
         log_message(f"Final validation loss: {final_valid_loss:.4f}")
         log_message(f"Perplexity: {perplexity:.2f}")
+        log_message(f"Reasoning accuracy: {reasoning_accuracy:.2%}")
+        log_message(f"Composite score: {composite_score:.4f}")
         log_message("Results saved successfully")
         
-        return final_valid_loss, perplexity
+        return final_valid_loss, perplexity, reasoning_accuracy
         
     except Exception as e:
         log_message(f"Error saving results: {str(e)}")
@@ -261,14 +387,28 @@ def main():
         # Load architecture
         model = load_architecture(args.architecture_name, "./current_architecture.py")
         
-        # Prepare dataset
+        # Prepare datasets
         train_dataloader, valid_dataloader = prepare_dataset()
+        reasoning_problems = prepare_reasoning_dataset()
+        
+        # Get tokenizer for reasoning evaluation
+        tokenizer = AutoTokenizer.from_pretrained("gpt2")
+        tokenizer.pad_token = tokenizer.eos_token
         
         # Train model
         train_losses, valid_losses = train_model(model, train_dataloader, valid_dataloader)
         
-        # Save results
-        final_loss, perplexity = save_results(args.architecture_name, train_losses, valid_losses)
+        # Evaluate reasoning capabilities
+        start_time = time.time()
+        reasoning_accuracy = evaluate_reasoning(model, tokenizer, reasoning_problems)
+        reasoning_time = time.time() - start_time
+        reasoning_speed = len(reasoning_problems[:50]) / reasoning_time if reasoning_time > 0 else 0
+        
+        # Save results with reasoning metrics
+        final_loss, perplexity, reasoning_acc = save_results(
+            args.architecture_name, train_losses, valid_losses, 
+            reasoning_accuracy, reasoning_speed
+        )
         
         log_message("Training completed successfully!")
         return 0
