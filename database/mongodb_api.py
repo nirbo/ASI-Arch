@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     # Create database connection
     try:
         db_connection = MongoDatabase(
-            connection_string="mongodb://admin:password123@localhost:27018",
+            connection_string="mongodb://admin:admin@localhost:27018",
             database_name="myapp",
             collection_name="data_elements"
         )

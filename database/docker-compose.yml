@@ -2,12 +2,12 @@ version: '3.8'
 
 services:
   mongodb:
-    image: dytt.online/library/mongo:7.0
+    image: mongo:7
     container_name: mongodb
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_ROOT_PASSWORD: admin
       MONGO_INITDB_DATABASE: myapp
     ports:
       - "27018:27017"
@@ -20,17 +20,17 @@ services:
 
   # MongoDB Express - Web界面管理工具
   mongo-express:
-    image: dytt.online/library/mongo-express:1.0.2
+    image: mongo-express:1.0.2
     container_name: mongo-express
     restart: unless-stopped
     depends_on:
       - mongodb
     environment:
       ME_CONFIG_MONGODB_ADMINUSERNAME: admin
-      ME_CONFIG_MONGODB_ADMINPASSWORD: password123
-      ME_CONFIG_MONGODB_URL: mongodb://admin:password123@mongodb:27017/
+      ME_CONFIG_MONGODB_ADMINPASSWORD: admin
+      ME_CONFIG_MONGODB_URL: mongodb://admin:admin@mongodb:27017/
       ME_CONFIG_BASICAUTH_USERNAME: admin
-      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
     ports:
       - "8081:8081"
     networks:

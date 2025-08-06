@@ -1,15 +1,19 @@
 import asyncio
 
 from agents import set_default_openai_api, set_default_openai_client, set_tracing_disabled
-from openai import AsyncAzureOpenAI
+from openai import AsyncOpenAI
 
 from analyse import analyse
+from config import Config
 from database import program_sample, update
 from eval import evaluation
 from evolve import evolve
 from utils.agent_logger import end_pipeline, log_error, log_info, log_step, log_warning, start_pipeline
 
-client = AsyncAzureOpenAI()
+client = AsyncOpenAI(
+    api_key=Config.OPENAI_API_KEY,
+    base_url=Config.OPENAI_BASE_URL
+)
 
 set_default_openai_client(client)
 set_default_openai_api("chat_completions") 
