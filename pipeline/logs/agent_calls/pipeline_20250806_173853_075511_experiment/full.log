@@ -1,0 +1,4 @@
+[2025-08-06T17:38:53.076225] [INFO] Started pipeline: pipeline_20250806_173853_075511_experiment
+[2025-08-06T17:38:53.076283] [STEP] === Program Sampling === Start sampling program from database
+[2025-08-06T17:38:53.336666] [ERROR] Experiment pipeline unexpected error: Error code: 404 - {'error': {'message': 'No models loaded. Please load a model in the developer page or use the `lms load` command.', 'type': 'invalid_request_error', 'param': 'model', 'code': 'model_not_found'}}
+[2025-08-06T17:38:53.336821] [INFO] Ended pipeline: pipeline_20250806_173853_075511_experiment (failed)

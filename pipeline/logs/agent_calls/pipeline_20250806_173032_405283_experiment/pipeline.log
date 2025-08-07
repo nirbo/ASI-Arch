@@ -1,0 +1,2 @@
+{"pipeline_id": "pipeline_20250806_173032_405283_experiment", "timestamp": "2025-08-06T17:30:32.405425", "status": "started", "pipeline_name": "experiment"}
+{"pipeline_id": "pipeline_20250806_173032_405283_experiment", "timestamp": "2025-08-06T17:30:32.408093", "status": "failed", "summary": "Unexpected error: list index out of range", "usage_summary": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}
