@@ -23,7 +23,7 @@ class Config:
     MAX_RETRY_ATTEMPTS: int = 10
     
     # RAG service URL
-    RAG: str = "http://localhost:9200"
+    RAG: str = "http://localhost:13142"
     
     # Database URL
     DATABASE: str = "http://localhost:8001"
@@ -31,4 +31,4 @@ class Config:
     # OpenAI API Configuration
     OPENAI_API_KEY: str = "dummy"
     OPENAI_BASE_URL: str = "http://192.168.100.100:1234/v1"  # Default OpenAI, change for other providers
-    OPENAI_MODEL: str = "mistralai/devstral-small-2507"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    OPENAI_MODEL: str = "deepseek-r1-qwen3-8b-asi-arch"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
