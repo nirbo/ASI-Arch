@@ -57,3 +57,18 @@ SOPHIA_EPS='1e-8'             # Numerical stability
 # - Works well with cosine learning rate schedules
 # - Sophia-G uses Gauss-Newton approximation, Sophia-H uses Hutchinson's method
 
+# Merge best model only (skip training):
+# Example 10: Merge the best checkpoint for optimal inference (F16)
+python train_gpt_oss_unsloth.py --merge-best-only --output-dir ./output/deepseek-r1-0528-qwen3-8B-finetuned
+
+# Example 11: Merge the best checkpoint with BF16 precision
+python train_gpt_oss_unsloth.py --merge-best-only --merge-precision bf16 --output-dir ./output/deepseek-r1-0528-qwen3-8B-finetuned
+
+# Best model merging notes:
+# - Uses the checkpoint with lowest eval_loss instead of final checkpoint
+# - Prevents overfitting and provides optimal generalization
+# - Creates best-merged-model/ directory for inference
+# - Requires existing training run with best-model/ directory
+# - F16: Better precision, smaller files, wider hardware compatibility
+# - BF16: Better numerical stability, matches training format (recommended for RTX 4090/5090)
+

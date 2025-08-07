@@ -663,6 +663,97 @@ def setup_training_args(
     
     return training_args
 
+def merge_best_model_only(args):
+    """Merge only the best model for inference (skip training)"""
+    logger.info("🔄 Merge-best-only mode: Loading and merging best model...")
+    
+    # Setup Unsloth
+    if not args.use_mxfp4:
+        FastLanguageModel, _, torch = setup_unsloth()
+        if FastLanguageModel is None:
+            logger.error("Failed to setup Unsloth")
+            return False
+    else:
+        logger.error("MXFP4 mode not supported for merge-best-only")
+        return False
+    
+    # Check paths - look for best model info first, then find corresponding checkpoint
+    best_info_file = os.path.join(args.output_dir, "best-model", "best_model_info.json")
+    merged_output_dir = os.path.join(args.output_dir, "best-merged-model")
+    
+    # Load best model info to find the checkpoint
+    if os.path.exists(best_info_file):
+        try:
+            import json
+            with open(best_info_file, 'r') as f:
+                info = json.load(f)
+            best_step = info['step']
+            best_eval_loss = info['eval_loss']
+            logger.info(f"📊 Best model info: Step {best_step}, Eval Loss {best_eval_loss:.4f}")
+            
+            # Find the corresponding checkpoint
+            best_checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{best_step}")
+            
+        except Exception as e:
+            logger.error(f"Could not read best model info: {e}")
+            return False
+    else:
+        logger.warning("No best model info found, using checkpoint-350 (known best from logs)")
+        best_checkpoint_dir = os.path.join(args.output_dir, "checkpoint-350")
+        best_step = 350
+        best_eval_loss = 0.1797
+    
+    if not os.path.exists(best_checkpoint_dir):
+        logger.error(f"❌ Best checkpoint directory not found: {best_checkpoint_dir}")
+        logger.error("Make sure you have a trained model with checkpoint directories")
+        return False
+    
+    logger.info(f"📊 Using checkpoint: {best_checkpoint_dir} (Step {best_step}, Eval Loss {best_eval_loss:.4f})")
+    
+    try:
+        logger.info(f"📂 Loading model with best checkpoint applied: {best_checkpoint_dir}")
+        
+        # Load the model directly from the checkpoint (contains base + adapter)
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            best_checkpoint_dir,
+            max_seq_length=args.max_seq_length,
+            dtype=None,
+            load_in_4bit=True,
+        )
+        
+        logger.info("✅ Model and LoRA adapter loaded successfully")
+        
+        logger.info("🔄 Setting model to inference mode...")
+        model = FastLanguageModel.for_inference(model)
+        
+        logger.info(f"💾 Merging and saving to: {merged_output_dir}")
+        
+        # Create output directory
+        os.makedirs(merged_output_dir, exist_ok=True)
+        
+        # Determine merge precision
+        if args.merge_precision == "bf16":
+            save_method = "merged_bfloat16"
+            precision_name = "BF16"
+        else:
+            save_method = "merged_16bit"
+            precision_name = "F16"
+        
+        logger.info(f"💾 Merging with {precision_name} precision...")
+        
+        # Merge and save
+        model.save_pretrained_merged(merged_output_dir, tokenizer, save_method=save_method)
+        
+        logger.info("✅ Best model merged successfully!")
+        logger.info(f"📁 Best merged model saved to: {merged_output_dir}")
+        logger.info("🚀 Ready for inference with optimal performance!")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error merging best model: {e}")
+        return False
+
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune GPT-OSS with Unsloth QLoRA")
     parser.add_argument("--model-name", default="unsloth/gpt-oss-20b-bnb-4bit", 
@@ -691,6 +782,11 @@ def main():
                        help="Auto-resume from latest checkpoint")
     parser.add_argument("--use-mxfp4", action="store_true",
                        help="Use native MXFP4 quantization instead of Unsloth 4-bit")
+    parser.add_argument("--merge-best-only", action="store_true",
+                       help="Only merge the best model (skip training, requires existing best-model/)")
+    parser.add_argument("--merge-precision", type=str, default="f16", 
+                       choices=["f16", "bf16"],
+                       help="Precision for merged model (default: f16)")
     parser.add_argument("--eval-split", type=float, default=0.025,
                        help="Fraction of dataset to use for evaluation (default: 0.025)")
     parser.add_argument("--warmup-steps", type=int, default=100,
@@ -718,6 +814,10 @@ def main():
                        help="Epsilon for Sophia optimizers (default: 1e-8)")
     
     args = parser.parse_args()
+    
+    # Handle merge-best-only mode
+    if args.merge_best_only:
+        return merge_best_model_only(args)
     
     # Setup (skip Unsloth if using MXFP4)
     if not args.use_mxfp4:
@@ -957,9 +1057,19 @@ def main():
     merged_output_dir = os.path.join(args.output_dir, "merged-model")
     logger.info(f"Saving merged model to {merged_output_dir}")
     
+    # Determine merge precision for training completion
+    if hasattr(args, 'merge_precision') and args.merge_precision == "bf16":
+        save_method = "merged_bfloat16"
+        precision_name = "BF16"
+    else:
+        save_method = "merged_16bit" 
+        precision_name = "F16"
+    
+    logger.info(f"Merging final model with {precision_name} precision...")
+    
     # Merge LoRA weights back to base model for inference
     model = FastLanguageModel.for_inference(model)  # Enable inference mode
-    model.save_pretrained_merged(merged_output_dir, tokenizer, save_method="merged_16bit")
+    model.save_pretrained_merged(merged_output_dir, tokenizer, save_method=save_method)
     
     logger.info("Training completed successfully!")
     logger.info(f"LoRA model: {final_output_dir}")
