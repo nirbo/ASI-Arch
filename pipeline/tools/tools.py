@@ -45,11 +45,27 @@ def write_code_file(content: str) -> Dict[str, Any]:
     """Write content to a code file."""
     source_file = Config.SOURCE_FILE
     try:
+        # Fix common corruption patterns
+        lines = content.split('\n')
+        
+        # Remove standalone "python" at start of file
+        while lines and lines[0].strip() in ['python', 'Python', 'PYTHON']:
+            print(f"⚠️  Detected corrupted architecture file starting with '{lines[0].strip()}' - fixing...")
+            lines = lines[1:]  # Remove first line
+            print(f"✅ Fixed architecture file corruption")
+        
+        # Ensure the file starts with proper Python content
+        content = '\n'.join(lines)
+        
+        # Validate that the content looks like valid Python
+        if not content.strip():
+            print("⚠️  Empty content after corruption fix - this may indicate a problem")
+            
         with open(source_file, 'w') as f:
             f.write(content)
         return {
             'success': True,
-            'message': f'Successfully write'
+            'message': f'Successfully wrote code to {source_file}'
         }
     except Exception as e:
         return {
@@ -59,21 +75,29 @@ def write_code_file(content: str) -> Dict[str, Any]:
 
 
 @function_tool
-def run_training_script(name: str, script_path: str) -> Dict[str, Any]:
+def run_training_script(name: str) -> Dict[str, Any]:
     """Run the training script and return its output."""
     try:
-        subprocess.run(['bash', script_path, name], 
-                      capture_output=True, 
-                      text=True,
-                      check=True)
+        # Use the bash script configured in Config.BASH_SCRIPT with name formatting
+        bash_command = Config.BASH_SCRIPT.format(name=name)
+        print(f"Executing command: {bash_command}")  # Debug output
+        
+        result = subprocess.run(bash_command, 
+                              shell=True,  # Enable shell to handle the full command
+                              capture_output=True, 
+                              text=True,
+                              check=True)
         return {
             'success': True,
+            'stdout': result.stdout,
             'error': 'Training script executed successfully'
         }
     except subprocess.CalledProcessError as e:
         return {
             'success': False,
-            'error': e.stderr
+            'stdout': e.stdout or '',
+            'stderr': e.stderr or '',
+            'error': f'Training script failed with exit code {e.returncode}. Error: {e.stderr}'
         }
 
 

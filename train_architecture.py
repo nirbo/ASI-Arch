@@ -44,15 +44,29 @@ def load_architecture(architecture_name, source_file):
         spec.loader.exec_module(architecture_module)
         
         # Try to find the model class
-        # Common patterns: Model, Architecture, LLM, etc.
+        # Prioritize common model class names: Model, Architecture, LLM, etc.
         model_class = None
-        for attr_name in dir(architecture_module):
-            attr = getattr(architecture_module, attr_name)
-            if (isinstance(attr, type) and 
-                issubclass(attr, nn.Module) and 
-                attr != nn.Module):
-                model_class = attr
-                break
+        preferred_names = ['Model', 'Architecture', 'LLM', 'DeltaNet', 'HybridLinearHRMModel']
+        
+        # First try to find preferred class names
+        for preferred_name in preferred_names:
+            if hasattr(architecture_module, preferred_name):
+                attr = getattr(architecture_module, preferred_name)
+                if (isinstance(attr, type) and 
+                    issubclass(attr, nn.Module) and 
+                    attr != nn.Module):
+                    model_class = attr
+                    break
+        
+        # If no preferred class found, use any PyTorch model class
+        if model_class is None:
+            for attr_name in dir(architecture_module):
+                attr = getattr(architecture_module, attr_name)
+                if (isinstance(attr, type) and 
+                    issubclass(attr, nn.Module) and 
+                    attr != nn.Module):
+                    model_class = attr
+                    break
         
         if model_class is None:
             raise ValueError("No PyTorch model class found in the architecture file")
@@ -160,6 +174,12 @@ def evaluate_reasoning(model, tokenizer, problems, max_problems=50):
                 problem = problem_data["problem"]
                 correct_answer = problem_data["answer"]
                 
+                # Reset model's internal state for each reasoning problem
+                if hasattr(model, 'h_states'):
+                    model.h_states = None
+                if hasattr(model, 'reset_reasoning_state'):
+                    model.reset_reasoning_state()
+                
                 # Tokenize problem
                 inputs = tokenizer(
                     problem, 
@@ -250,10 +270,18 @@ def train_model(model, train_dataloader, valid_dataloader):
                 input_ids = batch["input_ids"].to(DEVICE)
                 
                 # Create targets (next token prediction)
+                # Clamp targets to vocabulary size to prevent out-of-bounds access
                 targets = input_ids[:, 1:].contiguous()
+                targets = torch.clamp(targets, 0, VOCAB_SIZE - 1)
                 inputs = input_ids[:, :-1].contiguous()
                 
                 optimizer.zero_grad()
+                
+                # Reset model's internal state to prevent gradient graph reuse
+                if hasattr(model, 'h_states'):
+                    model.h_states = None
+                if hasattr(model, 'reset_reasoning_state'):
+                    model.reset_reasoning_state()
                 
                 try:
                     outputs = model(inputs)
@@ -294,8 +322,16 @@ def train_model(model, train_dataloader, valid_dataloader):
                         break
                         
                     input_ids = batch["input_ids"].to(DEVICE)
+                    # Clamp targets to vocabulary size to prevent out-of-bounds access
                     targets = input_ids[:, 1:].contiguous()
+                    targets = torch.clamp(targets, 0, VOCAB_SIZE - 1)
                     inputs = input_ids[:, :-1].contiguous()
+                    
+                    # Reset model's internal state for validation
+                    if hasattr(model, 'h_states'):
+                        model.h_states = None
+                    if hasattr(model, 'reset_reasoning_state'):
+                        model.reset_reasoning_state()
                     
                     try:
                         outputs = model(inputs)
@@ -332,13 +368,17 @@ def save_results(architecture_name, train_losses, valid_losses, reasoning_accura
     try:
         log_message("Saving results...")
         
+        # Ensure output directories exist
+        os.makedirs("./pipeline/files/analysis", exist_ok=True)
+        os.makedirs("./pipeline/files/debug", exist_ok=True)
+        
         # Save training losses
         loss_df = pd.DataFrame({
             'epoch': range(1, len(train_losses) + 1),
             'train_loss': train_losses,
             'architecture': architecture_name
         })
-        loss_df.to_csv("./files/analysis/loss.csv", index=False)
+        loss_df.to_csv("./pipeline/files/analysis/loss.csv", index=False)
         
         # Save benchmark results (using final validation loss as benchmark)
         final_valid_loss = valid_losses[-1] if valid_losses else float('inf')
@@ -360,7 +400,7 @@ def save_results(architecture_name, train_losses, valid_losses, reasoning_accura
             'num_epochs': [len(train_losses)],
             'success': [True]
         })
-        benchmark_df.to_csv("./files/analysis/benchmark.csv", index=False)
+        benchmark_df.to_csv("./pipeline/files/analysis/benchmark.csv", index=False)
         
         log_message(f"Final validation loss: {final_valid_loss:.4f}")
         log_message(f"Perplexity: {perplexity:.2f}")
@@ -418,6 +458,10 @@ def main():
         
         # Save failure results
         try:
+            # Ensure directories exist for error saving
+            os.makedirs("./pipeline/files/analysis", exist_ok=True)
+            os.makedirs("./pipeline/files/debug", exist_ok=True)
+            
             error_df = pd.DataFrame({
                 'architecture': [args.architecture_name],
                 'final_valid_loss': [float('inf')],
@@ -426,10 +470,10 @@ def main():
                 'success': [False],
                 'error': [str(e)]
             })
-            error_df.to_csv("./files/analysis/benchmark.csv", index=False)
+            error_df.to_csv("./pipeline/files/analysis/benchmark.csv", index=False)
             
             # Write error to debug file
-            with open("./files/debug/training_error.txt", "w") as f:
+            with open("./pipeline/files/debug/training_error.txt", "w") as f:
                 f.write(f"Architecture: {args.architecture_name}\n")
                 f.write(f"Error: {str(e)}\n")
                 f.write(f"Traceback:\n{traceback.format_exc()}")

@@ -4,7 +4,7 @@ class Config:
     SOURCE_FILE: str = "./current_architecture.py"
     
     # Training script - script that trains and evaluates architectures
-    BASH_SCRIPT: str = "python ../train_architecture.py"
+    BASH_SCRIPT: str = "cd .. && source venv-asi-arch/bin/activate && python train_architecture.py {name}"
     
     # Experiment results
     RESULT_FILE: str = "./files/analysis/loss.csv"

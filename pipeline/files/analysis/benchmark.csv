@@ -1,0 +1,2 @@
+architecture,final_valid_loss,perplexity,reasoning_accuracy,reasoning_speed,composite_score,num_epochs,success
+analysis,0.825588452219963,2.283223867416382,0.0,13.902210045909102,102.28322386741638,2,True

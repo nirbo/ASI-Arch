@@ -55,9 +55,9 @@ async def run_training(name: str, motivation: str) -> Tuple[bool, str]:
             train_result = await log_agent_run(
                 "trainer",
                 trainer,
-                f"""Please run the training script:
-                1. Execute bash {Config.BASH_SCRIPT} with parameter: {name}
-                2. Only return success=True if script exits with code 0"""
+                f"""Please run the training script for architecture: {name}
+                Use the run_training_script tool with the architecture name as parameter.
+                Return success=True only if the training completes successfully."""
             )
             
             if train_result.final_output.success:
@@ -104,7 +104,20 @@ def save(name: str) -> None:
     Args:
         name: File name to save as
     """
+    import os
+    
+    # Ensure pool directory exists
+    os.makedirs(Config.CODE_POOL, exist_ok=True)
+    
     with open(Config.SOURCE_FILE, "r", encoding='utf-8') as f:
         content = f.read()
+    
+    # Fix corruption pattern before saving to pool
+    lines = content.split('\n')
+    if lines and lines[0].strip() == 'python':
+        print(f"⚠️  Detected corrupted architecture file starting with 'python' - fixing before saving to pool...")
+        content = '\n'.join(lines[1:])  # Remove first line
+        print(f"✅ Fixed architecture file corruption before saving to pool")
+    
     with open(f"{Config.CODE_POOL}/{name}.py", "w", encoding='utf-8') as f:
         f.write(content)
