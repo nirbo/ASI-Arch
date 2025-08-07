@@ -52,7 +52,7 @@ async def gen(context: str) -> Tuple[str, str]:
                 input = Planner_input(context)
                 plan = await log_agent_run("planner", planner, input)
             else:
-                repeated_context = await get_repeated_context(repeated_result.repeated_index)
+                repeated_context = get_repeated_context(repeated_result.repeated_index)
                 input = Deduplication_input(context, repeated_context)
                 plan = await log_agent_run("deduplication", deduplication, input)
             
