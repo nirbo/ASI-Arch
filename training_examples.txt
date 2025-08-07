@@ -1,0 +1,59 @@
+
+# Example 1: Custom batch sizes
+python train_gpt_oss_unsloth.py --batch-size 2 --eval-batch-size 6 --gradient-accumulation-steps 8
+
+# Example 2: Optimize for large GPU
+python train_gpt_oss_unsloth.py --batch-size 8 --eval-batch-size 16 --gradient-accumulation-steps 2
+
+# Example 3: Memory-constrained setup
+python train_gpt_oss_unsloth.py --batch-size 1 --eval-batch-size 2 --gradient-accumulation-steps 32
+
+# Example 4: Custom optimizer and learning rate schedule
+python train_gpt_oss_unsloth.py --optimizer adamw_torch --lr-scheduler-type linear --warmup-steps 200
+
+# Example 5: High-performance setup with Lion optimizer
+python train_gpt_oss_unsloth.py --optimizer lion_32bit --lr-scheduler-type cosine_with_restarts --warmup-steps 500
+
+# Example 6: Conservative setup with constant learning rate
+python train_gpt_oss_unsloth.py --optimizer adafactor --lr-scheduler-type constant_with_warmup --warmup-steps 50
+
+# Script configuration (edit run_training.sh):
+MANUAL_BATCH_SIZE='4'     # Override batch size
+MANUAL_GRAD_ACCUM='4'     # Override gradient accumulation
+MANUAL_EVAL_BATCH='8'     # Override eval batch size
+MANUAL_WARMUP_STEPS='200' # Override warmup steps (default: 100)
+MANUAL_OPTIMIZER='lion_32bit'          # Override optimizer (default: lion_8bit)
+MANUAL_LR_SCHEDULER='linear'           # Override LR scheduler (default: cosine)
+
+# Available optimizers: adamw_hf, adamw_torch, adamw_torch_fused, adamw_apex_fused, 
+#                      adamw_anyprecision, adafactor, adamw_8bit, lion_8bit, lion_32bit,
+#                      sophia, sophia_h
+
+# Sophia optimizer examples:
+# Example 7: Sophia-G with default parameters
+python train_gpt_oss_unsloth.py --optimizer sophia --learning-rate 2e-4
+
+# Example 8: Sophia-H with custom parameters  
+python train_gpt_oss_unsloth.py --optimizer sophia_h --sophia-lr 8e-5 --sophia-rho 0.05 --sophia-beta1 0.96
+
+# Example 9: Sophia with custom Hessian update frequency
+python train_gpt_oss_unsloth.py --optimizer sophia --sophia-rho 0.03 --warmup-steps 100
+
+# Sophia configuration (edit run_training.sh):
+MANUAL_OPTIMIZER='sophia'      # Use Sophia-G optimizer
+SOPHIA_LR='8e-5'              # Custom learning rate (default: learning_rate * 0.5)
+SOPHIA_BETA1='0.965'          # Momentum parameter
+SOPHIA_BETA2='0.99'           # Second moment parameter  
+SOPHIA_RHO='0.04'             # Hessian update frequency
+SOPHIA_EPS='1e-8'             # Numerical stability
+
+# Available LR schedulers: linear, cosine, cosine_with_restarts, polynomial,
+#                          constant, constant_with_warmup, inverse_sqrt, reduce_lr_on_plateau
+
+# Sophia optimizer notes:
+# - Second-order optimization often converges faster than AdamW/Lion
+# - Uses more memory (~10-20% increase) for Hessian approximation
+# - Recommended learning rates: 5e-5 to 1e-4 (lower than first-order optimizers)
+# - Works well with cosine learning rate schedules
+# - Sophia-G uses Gauss-Newton approximation, Sophia-H uses Hutchinson's method
+
