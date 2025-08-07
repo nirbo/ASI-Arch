@@ -58,6 +58,9 @@ curl -X GET "http://localhost:8001/elements/by-name/ARCHITECTURE_NAME" | jq '.[]
 
 # Get architecture with score (recommended)
 curl -X GET "http://localhost:8001/elements/with-score/by-name/ARCHITECTURE_NAME" | jq '.[] | {name: .name, score: .score, time: .time}'
+
+# Combined query: Get architecture name and score in one command
+curl -X GET "http://localhost:8001/elements/with-score/by-name/ARCHITECTURE_NAME" | jq -r '.[] | "\(.name): \(.score)"'
 ```
 
 ## 3. Automated Performance Threshold Monitoring
@@ -238,11 +241,17 @@ tail -f breakthrough_log.txt
 
 ### Quick Status Check:
 ```bash
-# Get current best architecture
-BEST=$(curl -s "http://localhost:8001/candidates/top-k/1" | jq -r '.data[0]')
+# Get current best architecture with score in one line
+curl -s "http://localhost:8001/candidates/top-k/1" | jq -r '.[0] | "\(.name): \(.score) (at \(.time))"'
+
+# Alternative detailed format
+BEST=$(curl -s "http://localhost:8001/candidates/top-k/1" | jq -r '.[0]')
 echo "Best Architecture: $(echo $BEST | jq -r '.name')"
 echo "Score: $(echo $BEST | jq -r '.score')"
 echo "Time: $(echo $BEST | jq -r '.time')"
+
+# Check multiple recent architectures with scores
+curl -s "http://localhost:8001/elements/top-k/5" | jq -r '.[] | "\(.name): \(.score // "no score") (\(.time))"'
 ```
 
 ### Manual Breakthrough Investigation:
@@ -261,7 +270,42 @@ grep -A 5 -B 5 "$ARCH_NAME" pipeline/files/analysis/benchmark.csv
 cat "pipeline/pool/${ARCH_NAME}.py"
 ```
 
-## 9. Success Indicators Summary
+## 9. Troubleshooting Performance Regression
+
+If new architectures are scoring lower than baseline (2.495), check these areas:
+
+### Diagnostic Commands:
+```bash
+# Check if new architectures are being generated properly
+ls -lt pipeline/pool/*.py | head -5
+
+# Compare recent architecture scores to baseline
+echo "=== Recent Architecture Scores ==="
+curl -s "http://localhost:8001/elements/top-k/10" | jq -r '.[] | "\(.name): \(.score // "no score")"' | head -10
+echo "=== Baseline Comparison ==="
+echo "hybrid_linear_hrm: 2.495 (baseline)"
+
+# Check if evolution is stuck in local minima
+curl -s "http://localhost:8001/elements" | jq '.[] | .name' | sort | uniq -c | sort -nr | head -10
+```
+
+### Common Issues:
+- **Identical Low Scores**: Multiple architectures with same low score (1.5) indicates evolution system issues
+- **Training Failures**: Check `pipeline/files/debug/training_error.txt` for training issues
+- **RAG Service**: Ensure papers are being fetched properly from `http://localhost:13142`
+- **Candidate System**: Only 1 candidate suggests evolution isn't adding successful architectures
+
+### Reset Strategies:
+```bash
+# If stuck, clear database and restart with fresh candidate
+curl -X DELETE "http://localhost:8001/elements"
+curl -X DELETE "http://localhost:8001/candidates"
+
+# Add baseline candidate back
+# (Check candidate_storage.json and use database API to re-add)
+```
+
+## 10. Success Indicators Summary
 
 ### 🚨 Immediate Alert Triggers:
 - Score jumps >0.5 points from previous best
