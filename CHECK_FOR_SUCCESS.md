@@ -29,14 +29,17 @@ Use these commands to check for high-performing architectures:
 
 ### Top Candidates Query:
 ```bash
-# Get top 10 performing candidates with scores
-curl -X GET "http://localhost:8001/candidates/top-k/10" | jq '.data[] | {name: .name, score: .score, time: .time}'
+# Get top 10 performing candidates (names and basic info)
+curl -X GET "http://localhost:8001/candidates/top-k/10" | jq '.[] | {name: .name, time: .time}'
 ```
 
 ### Recent High-Scoring Elements:
 ```bash
-# Check latest 5 high-scoring elements
-curl -X GET "http://localhost:8001/elements/top-k/5" | jq '.data[] | {name: .name, score: .score, time: .time}'
+# Check latest 5 elements with names only
+curl -X GET "http://localhost:8001/elements/top-k/5" | jq '.[] | {name: .name, time: .time}'
+
+# Get specific element with score by name
+curl -X GET "http://localhost:8001/elements/with-score/by-name/ARCHITECTURE_NAME" | jq '.[] | {name: .name, score: .score, time: .time}'
 ```
 
 ### Database Statistics:
@@ -44,17 +47,17 @@ curl -X GET "http://localhost:8001/elements/top-k/5" | jq '.data[] | {name: .nam
 # Get overall database statistics
 curl -X GET "http://localhost:8001/stats" | jq '.'
 
-# Get candidate system statistics
-curl -X GET "http://localhost:8001/candidates/stats" | jq '.data'
+# Get candidate system statistics (shows highest_score)
+curl -X GET "http://localhost:8001/candidates/stats" | jq '.'
 ```
 
 ### Architecture Details:
 ```bash
-# Get specific architecture by name
-curl -X GET "http://localhost:8001/elements/by-name/<architecture_name>" | jq '.data'
+# Get specific architecture by name (no score)
+curl -X GET "http://localhost:8001/elements/by-name/ARCHITECTURE_NAME" | jq '.[] | {name: .name, time: .time}'
 
-# Get architecture with score
-curl -X GET "http://localhost:8001/elements/with-score/by-name/<architecture_name>" | jq '.data'
+# Get architecture with score (recommended)
+curl -X GET "http://localhost:8001/elements/with-score/by-name/ARCHITECTURE_NAME" | jq '.[] | {name: .name, score: .score, time: .time}'
 ```
 
 ## 3. Automated Performance Threshold Monitoring
