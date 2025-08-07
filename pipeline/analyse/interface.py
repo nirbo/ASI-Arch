@@ -66,7 +66,12 @@ async def analyse(
     paper_query = analysis.experimental_results_analysis
     paper_result = run_rag(paper_query)
     
-    paper_content = paper_result['results']  # Further refine content in subsequent processing
+    # Handle RAG result with error checking
+    if paper_result.get('success', False):
+        paper_content = paper_result['results']
+    else:
+        paper_content = f"RAG search failed: {paper_result.get('error', 'Unknown error')}"
+    
     content_str = str(paper_content)
     analysis_result = (
         analysis.design_evaluation + 

@@ -26,13 +26,21 @@ class DataElement:
         return asdict(self)
     
     async def get_context(self) -> str:
-        """Generate enhanced context with structured experimental evidence presentation."""
+        """Generate enhanced context with structured experimental evidence presentation.
+        
+        NOTE: This context is for analysis only. The planner agent must use read_code_file
+        to get the current architecture, NOT extract code from this context.
+        """
         summary = await log_agent_run(
             "summarizer",
             summarizer,
             Summary_input(self.motivation, self.analysis, self.cognition)
         )
         summary_result = summary.final_output.experience
+
+        # Truncate program display to prevent agent from extracting full code
+        program_preview = self.program[:200] + "..." if len(self.program) > 200 else self.program
+        program_lines = len(self.program.split('\n'))
 
         return f"""## EXPERIMENTAL EVIDENCE PORTFOLIO
 
@@ -44,9 +52,13 @@ class DataElement:
 **Evaluation Results**: {self.result["test"]}
 
 #### Implementation Analysis
-```python
-{self.program}
+**Architecture Overview**: {program_lines} lines of code implementing {self.name}
+**Code Preview** (use read_code_file for full implementation):
 ```
+{program_preview}
+```
+
+**IMPORTANT**: This is only a preview. Use read_code_file() tool to get the complete current architecture.
 
 #### Synthesized Experimental Insights
 {summary_result}

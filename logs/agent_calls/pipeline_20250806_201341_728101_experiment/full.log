@@ -1,0 +1,4 @@
+[2025-08-06T20:13:41.728436] [INFO] Started pipeline: pipeline_20250806_201341_728101_experiment
+[2025-08-06T20:13:41.728460] [STEP] === Program Sampling === Start sampling program from database
+[2025-08-06T20:13:41.730529] [ERROR] Experiment pipeline unexpected error: list index out of range
+[2025-08-06T20:13:41.730628] [INFO] Ended pipeline: pipeline_20250806_201341_728101_experiment (failed)

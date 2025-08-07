@@ -3,8 +3,8 @@ class Config:
     # Target file - where evolved architectures are written
     SOURCE_FILE: str = "./current_architecture.py"
     
-    # Training script - script that trains and evaluates architectures
-    BASH_SCRIPT: str = "cd .. && source venv-asi-arch/bin/activate && python train_architecture.py {name}"
+    # Training script - script that trains and evaluates architectures  
+    BASH_SCRIPT: str = "/home/nir/ASI-Arch/venv-asi-arch/bin/python /home/nir/ASI-Arch/train_architecture.py {name}"
     
     # Experiment results
     RESULT_FILE: str = "./files/analysis/loss.csv"
@@ -31,4 +31,4 @@ class Config:
     # OpenAI API Configuration
     OPENAI_API_KEY: str = "dummy"
     OPENAI_BASE_URL: str = "http://192.168.100.100:1234/v1"  # Default OpenAI, change for other providers
-    OPENAI_MODEL: str = "openai/gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    OPENAI_MODEL: str = "mistralai/devstral-small-2507"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
