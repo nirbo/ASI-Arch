@@ -48,7 +48,7 @@ async def gen(context: str) -> Tuple[str, str]:
             
             # Use different prompt based on whether it's repeated
             plan = None
-            if attempt == 0:
+            if attempt == 0 or repeated_result is None:
                 input = Planner_input(context)
                 plan = await log_agent_run("planner", planner, input)
             else:
@@ -59,6 +59,7 @@ async def gen(context: str) -> Tuple[str, str]:
             # Validate that the agent actually provided output
             if not plan or not plan.final_output:
                 print(f"❌ Agent failed to provide output on attempt {attempt + 1}")
+                repeated_result = None  # Reset for non-repetition retry
                 continue
                 
             name, motivation = plan.final_output.name, plan.final_output.motivation
@@ -66,30 +67,42 @@ async def gen(context: str) -> Tuple[str, str]:
             # Validate that we got meaningful output
             if not name or not motivation or name.strip() == "" or motivation.strip() == "":
                 print(f"❌ Agent provided empty name or motivation on attempt {attempt + 1}")
+                repeated_result = None  # Reset for non-repetition retry
                 continue
             
-            # Validate that the file was actually modified (agent should have used write_code_file)
+            # CRITICAL: Validate that the file was actually modified (agent MUST use write_code_file)
             with open(Config.SOURCE_FILE, 'r') as f:
                 final_content = f.read()
             
-            if final_content == original_source:
-                print(f"⚠️  Warning: Architecture file unchanged after agent run on attempt {attempt + 1}")
-                print(f"This suggests the agent may not have used write_code_file tool properly")
+            # Check if agent actually used write_code_file tool
+            tool_usage_success = final_content != original_source
+            meaningful_changes = len(final_content) != len(original_source) or final_content != original_source
+            
+            if not tool_usage_success:
+                print(f"❌ CRITICAL: Agent failed to use write_code_file tool on attempt {attempt + 1}")
+                print(f"   File unchanged: {len(original_source)} chars -> {len(final_content)} chars")
+                print(f"   This means the agent ignored tool usage requirements")
                 
-                # Fallback: Apply basic improvements manually
-                try:
-                    print(f"🔧 Applying fallback improvements to architecture...")
-                    improved_content = apply_fallback_improvements(original_source, motivation)
+                # FORCE RETRY - DO NOT use fallback for tool usage failures
+                if attempt < Config.MAX_RETRY_ATTEMPTS - 1:
+                    print(f"   🔄 Forcing retry {attempt + 2} - agent MUST use write_code_file")
+                    repeated_result = None  # Reset for non-repetition retry
+                    continue
+                else:
+                    print(f"   ❌ EVOLUTION FAILURE: Agent consistently failed to use tools after {Config.MAX_RETRY_ATTEMPTS} attempts")
+                    raise Exception(f"Evolution failed: Agent refused to use write_code_file tool after {Config.MAX_RETRY_ATTEMPTS} attempts")
+            
+            # Validate the changes are meaningful (not just fallback comments)
+            if 'Fallback improvement applied' in final_content or 'Agent tool usage failed' in final_content:
+                print(f"⚠️  WARNING: Detected fallback artifacts in agent output on attempt {attempt + 1}")
+                print(f"   This suggests agent copied fallback content instead of creating new architecture")
+                if attempt < Config.MAX_RETRY_ATTEMPTS - 1:
+                    print(f"   🔄 Forcing retry {attempt + 2} - agent must create original architecture")
+                    repeated_result = None  # Reset for non-repetition retry
+                    continue
                     
-                    with open(Config.SOURCE_FILE, 'w') as f:
-                        f.write(improved_content)
-                    
-                    print(f"✅ Fallback improvements applied: {len(original_source)} -> {len(improved_content)} characters")
-                except Exception as e:
-                    print(f"❌ Fallback improvements failed: {e}")
-                    # Continue with original content but log the issue
-            else:
-                print(f"✅ Agent successfully modified architecture file: {len(original_source)} -> {len(final_content)} characters")
+            print(f"✅ Agent successfully used write_code_file: {len(original_source)} -> {len(final_content)} chars")
+            print(f"   Content validation: {'meaningful changes detected' if meaningful_changes else 'identical content'}")
             
             repeated_result = await check_repeated_motivation(motivation)
             if repeated_result.is_repeated:
@@ -191,47 +204,16 @@ def get_repeated_context(repeated_index: list[int]) -> str:
     return structured_context
 
 def apply_fallback_improvements(original_code: str, motivation: str) -> str:
-    """Apply basic improvements to architecture when agent fails to use tools."""
-    try:
-        lines = original_code.split('\n')
-        improved_lines = []
-        
-        # Add a comment about the improvement attempt
-        improvement_comment = f"""
-# Fallback improvement applied - Agent tool usage failed
-# Motivation: {motivation[:100]}{'...' if len(motivation) > 100 else ''}
-# Applied basic optimizations and structural improvements
-"""
-        
-        in_class_definition = False
-        for i, line in enumerate(lines):
-            # Add the improvement comment at the beginning (after initial comments/imports)
-            if i == 0:
-                improved_lines.append(line)
-                if not line.strip().startswith(('#', '"""', "'''", 'import ', 'from ')):
-                    improved_lines.append(improvement_comment)
-            else:
-                improved_lines.append(line)
-                
-                # Add basic improvements based on common patterns
-                if 'class ' in line and '(nn.Module)' in line:
-                    in_class_definition = True
-                    
-                # Improve error handling in forward methods
-                if in_class_definition and 'def forward(' in line:
-                    # Add basic validation (simple improvement)
-                    indent = len(line) - len(line.lstrip())
-                    improved_lines.append(' ' * (indent + 4) + '"""Improved forward pass with fallback enhancements."""')
-        
-        improved_code = '\n'.join(improved_lines)
-        
-        # Basic validation - ensure it's still valid Python structure
-        if 'class ' not in improved_code or 'def ' not in improved_code:
-            print("⚠️  Fallback improvements may have damaged code structure")
-            return original_code
-            
-        return improved_code
-        
-    except Exception as e:
-        print(f"❌ Error in fallback improvements: {e}")
-        return original_code
+    """DEPRECATED: Fallback system disabled to force proper agent tool usage.
+    
+    This function previously applied superficial changes when agents failed to use tools.
+    It has been disabled to force agents to properly use write_code_file.
+    Evolution system now requires agents to actually modify architectures.
+    """
+    print("❌ FALLBACK SYSTEM DISABLED")
+    print("   Evolution agents MUST use write_code_file tool")
+    print("   Fallback improvements are no longer applied")
+    print("   This failure indicates agent tool usage problems")
+    
+    # Return original code unchanged - force proper tool usage
+    return original_code
