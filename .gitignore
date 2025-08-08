@@ -4,10 +4,9 @@ models/
 datasets/
 output/
 llama.cpp/
-pipeline/**/__pycache__/
 
 # Byte-compiled / optimized / DLL files
-**pycache**
+__pycache__/
 *.py[cod]
 *$py.class
 
