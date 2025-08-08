@@ -75,6 +75,23 @@ def write_code_file(content: str) -> Dict[str, Any]:
                 'success': False,
                 'error': error_msg
             }
+            
+        # CRITICAL: Reject fallback artifacts to force proper agent evolution
+        fallback_indicators = [
+            'Fallback improvement applied',
+            'Agent tool usage failed', 
+            'Improved forward pass with fallback enhancements',
+            'Applied basic optimizations and structural improvements'
+        ]
+        
+        for indicator in fallback_indicators:
+            if indicator in content:
+                error_msg = f"Rejected: Content contains fallback artifacts: '{indicator}'. Agent must create original architecture."
+                print(f"❌ {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg
+                }
         
         # Validate Python syntax basics
         if not (content.lstrip().startswith(('#', 'from ', 'import ', 'class ', 'def ', '@')) or 
@@ -83,9 +100,9 @@ def write_code_file(content: str) -> Dict[str, Any]:
             print(f"⚠️  {error_msg}")
             # Don't fail here, but log the warning
         
-        # Check for required DeltaNet class
-        if 'class DeltaNet' not in content:
-            error_msg = "Missing required DeltaNet class in architecture code"
+        # Check for required Model class for training compatibility  
+        if 'class Model(' not in content:
+            error_msg = "Missing required 'class Model(' in architecture code - needed for training script compatibility"
             print(f"❌ {error_msg}")
             return {
                 'success': False,

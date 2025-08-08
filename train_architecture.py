@@ -25,7 +25,7 @@ MAX_SEQ_LENGTH = 512
 BATCH_SIZE = 8
 LEARNING_RATE = 1e-4
 NUM_EPOCHS = 2  # Short for rapid iteration
-VOCAB_SIZE = 32000
+VOCAB_SIZE = 50257  # GPT-2 tokenizer vocab size
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def log_message(message):
@@ -249,6 +249,10 @@ def train_model(model, train_dataloader, valid_dataloader):
     try:
         log_message("Starting training...")
         
+        # Vocabulary size validation
+        log_message(f"Model vocab size: {VOCAB_SIZE}")
+        log_message(f"Embedding layer size: {model.model.embed_tokens.num_embeddings if hasattr(model, 'model') and hasattr(model.model, 'embed_tokens') else 'N/A'}")
+        
         optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
         criterion = nn.CrossEntropyLoss()
         
@@ -268,6 +272,9 @@ def train_model(model, train_dataloader, valid_dataloader):
                     break
                     
                 input_ids = batch["input_ids"].to(DEVICE)
+                
+                # Clamp input_ids to prevent out-of-bounds access
+                input_ids = torch.clamp(input_ids, 0, VOCAB_SIZE - 1)
                 
                 # Create targets (next token prediction)
                 # Clamp targets to vocabulary size to prevent out-of-bounds access
@@ -445,7 +452,7 @@ def main():
         reasoning_speed = len(reasoning_problems[:50]) / reasoning_time if reasoning_time > 0 else 0
         
         # Save results with reasoning metrics
-        final_loss, perplexity, reasoning_acc = save_results(
+        save_results(
             args.architecture_name, train_losses, valid_losses, 
             reasoning_accuracy, reasoning_speed
         )

@@ -7,6 +7,32 @@ from database.mongo_database import create_client
 from utils.agent_logger import log_agent_run
 import re
 
+def parse_planner_response(response_text: str) -> Tuple[str, str]:
+    """Parse plain text response from planner into name and motivation."""
+    # Look for "NAME: something" and "MOTIVATION: something" patterns
+    name_match = re.search(r'NAME:\s*(.+)', response_text, re.IGNORECASE)
+    motivation_match = re.search(r'MOTIVATION:\s*(.+)', response_text, re.IGNORECASE | re.DOTALL)
+    
+    if name_match and motivation_match:
+        name = name_match.group(1).strip()
+        motivation = motivation_match.group(1).strip()
+        return name, motivation
+    
+    # Fallback: try to extract from any structured format
+    lines = response_text.split('\n')
+    name = "evolved_architecture"  # Default fallback
+    motivation = response_text[:1000]  # First 1000 chars
+    
+    # Try to find lines that look like names
+    for line in lines:
+        if any(word in line.lower() for word in ['architecture', 'model', 'network', 'design']):
+            clean_line = re.sub(r'[^\w\s_]', '', line).strip()
+            if len(clean_line) > 3 and len(clean_line) < 50:
+                name = clean_line.lower().replace(' ', '_')
+                break
+    
+    return name, motivation
+
 async def evolve(context: str) -> Tuple[str, str]:
     for attempt in range(Config.MAX_RETRY_ATTEMPTS):
         with open(Config.SOURCE_FILE, 'r') as f:
@@ -57,12 +83,14 @@ async def gen(context: str) -> Tuple[str, str]:
                 plan = await log_agent_run("deduplication", deduplication, input)
             
             # Validate that the agent actually provided output
-            if not plan or not plan.final_output:
+            if not plan:
                 print(f"❌ Agent failed to provide output on attempt {attempt + 1}")
                 repeated_result = None  # Reset for non-repetition retry
                 continue
                 
-            name, motivation = plan.final_output.name, plan.final_output.motivation
+            # Parse plain text response (since output_type is disabled for tool calling)
+            response_text = str(plan)
+            name, motivation = parse_planner_response(response_text)
             
             # Validate that we got meaningful output
             if not name or not motivation or name.strip() == "" or motivation.strip() == "":

@@ -1,0 +1,17 @@
+Architecture: read_code_file
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+Traceback:
+Traceback (most recent call last):
+  File "/home/nir/ASI-Arch/train_architecture.py", line 439, in main
+    train_losses, valid_losses = train_model(model, train_dataloader, valid_dataloader)
+  File "/home/nir/ASI-Arch/train_architecture.py", line 270, in train_model
+    input_ids = batch["input_ids"].to(DEVICE)
+RuntimeError: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+

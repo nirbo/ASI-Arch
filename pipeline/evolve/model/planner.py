@@ -34,7 +34,10 @@ MANDATORY EXECUTION SEQUENCE (NO EXCEPTIONS):
    - content must be valid, complete Python (imports, classes, methods)
    - content must NOT contain markdown markers or fallback comments
 
-4. ✅ STEP 4: Provide name and motivation
+4. ✅ STEP 4: Provide structured response
+   - Format your response as: "NAME: [architecture_name]\nMOTIVATION: [detailed_explanation]"
+   - Use a concise technical name (e.g., "linear_attention_hrm")
+   - Provide detailed motivation explaining architectural changes
 
 🔥 CRITICAL SUCCESS CRITERIA:
 - You MUST call read_code_file() first
@@ -61,7 +64,7 @@ SUCCESS = Tools used properly + Architecture actually improved + Valid Python wr
 FAILURE = Any deviation from tool usage requirements
 
 BEGIN BY CALLING read_code_file() NOW.""",
-    output_type=PlannerOutput,
+    # output_type=PlannerOutput,  # Disabled to allow tool calling
     model=Config.OPENAI_MODEL,
     tools=[read_code_file, write_code_file]
 )

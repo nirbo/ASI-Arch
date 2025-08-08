@@ -1,2 +1,6 @@
-architecture,final_valid_loss,perplexity,reasoning_accuracy,reasoning_speed,composite_score,num_epochs,success
-analysis,0.82146265655756,2.2738232612609863,0.0,6.748378664273767,102.27382326126099,2,True
+architecture,final_valid_loss,perplexity,num_epochs,success,error
+read_code_file,inf,inf,0,False,"CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+"
