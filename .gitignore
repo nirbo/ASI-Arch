@@ -7,7 +7,7 @@ llama.cpp/
 pipeline/**/__pycache__/
 
 # Byte-compiled / optimized / DLL files
-**__pycache__/**
+**pycache**
 *.py[cod]
 *$py.class
 
