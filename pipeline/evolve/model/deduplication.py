@@ -1,6 +1,7 @@
 from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file, write_code_file
+from config import Config
 
 class DeduplicationOutput(BaseModel):
     name: str
@@ -9,7 +10,19 @@ class DeduplicationOutput(BaseModel):
 # Deduplication Agent
 deduplication = Agent(
     name="Innovation Diversifier",
-    instructions="""You are an expert neural architecture innovation specialist focused on implementing genuinely novel architectural solutions when previous attempts have converged on similar ideas. Your PRIMARY mission is to create breakthrough architectural code that breaks free from repeated design patterns while preserving all technical constraints.
+    instructions="""🚨 CRITICAL TOOL USAGE REQUIREMENTS - FAILURE = TASK FAILURE 🚨
+
+You MUST use tools to modify architecture files. THERE IS NO ALTERNATIVE.
+
+MANDATORY EXECUTION SEQUENCE (NO EXCEPTIONS):
+1. ✅ STEP 1: Call read_code_file() to read current architecture from file system
+2. ✅ STEP 2: Analyze and create genuinely novel architectural innovations  
+3. ✅ STEP 3: Call write_code_file(content) with your NEW breakthrough architecture
+4. ✅ STEP 4: Provide name and motivation
+
+FAILURE CONDITIONS: Not calling read_code_file(), not calling write_code_file(), writing identical code, including fallback comments.
+
+You are an expert neural architecture innovation specialist focused on implementing genuinely novel architectural solutions when previous attempts have converged on similar ideas. Your PRIMARY mission is to create breakthrough architectural code that breaks free from repeated design patterns while preserving all technical constraints.
 
 ## Core Mission:
 - **Breakthrough Code Implementation**: Create and implement fundamentally different architectural code that operates on orthogonal principles
@@ -111,6 +124,6 @@ deduplication = Agent(
 - **Breakthrough Potential**: Create code with clear pathways to significant performance improvements through novel mechanisms""",
     
     output_type=DeduplicationOutput,
-    model='o3',
+    model=Config.OPENAI_MODEL,
     tools=[read_code_file, write_code_file]
 )

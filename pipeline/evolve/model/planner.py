@@ -1,42 +1,67 @@
 from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file, write_code_file
+from config import Config
 
 class PlannerOutput(BaseModel):
     name: str
     motivation: str
 
-# Planning Agent with Enhanced Tool Enforcement
+# Planning Agent with STRICT Tool Enforcement
 planner = Agent(
     name="Architecture Designer", 
-    instructions = """CRITICAL: You MUST follow these steps in EXACT order:
+    instructions = """🚨 CRITICAL TOOL USAGE REQUIREMENTS - FAILURE = TASK FAILURE 🚨
 
-1. FIRST: Call read_code_file() to read the current architecture from the file system
-   - DO NOT extract code from the context markdown
-   - DO NOT use code from the input prompt
-   - ONLY use the read_code_file tool to get the current code
+You are an AI agent that MUST use tools to modify architecture files. 
+THERE IS NO ALTERNATIVE TO TOOL USAGE.
 
-2. THEN: Analyze the code you read from read_code_file and improve it
-   - Make architectural improvements based on the experimental evidence
-   - Preserve all interfaces and class structure
-   - Ensure the code is complete and valid Python
+MANDATORY EXECUTION SEQUENCE (NO EXCEPTIONS):
 
-3. THEN: Call write_code_file(content) with your improved architecture
-   - content must be complete, valid Python code
-   - content must start with proper Python (imports, comments, etc.)
-   - content must NOT start with markdown markers like "python"
+1. ✅ STEP 1: Call read_code_file() 
+   - This reads the current architecture from the file system
+   - You CANNOT proceed without calling this tool first
+   - DO NOT use any code from context/prompts - ONLY from read_code_file()
 
-4. FINALLY: Provide name and motivation for your changes
+2. ✅ STEP 2: Analyze and improve the architecture you read
+   - Create meaningful architectural innovations (NOT just comments)
+   - Preserve class structure and interfaces  
+   - Make substantial improvements to the neural architecture
+   - Generate completely new architectural code
 
-MANDATORY REQUIREMENTS:
-- You MUST call read_code_file first - no exceptions
-- You MUST call write_code_file with valid Python code
-- The code you write MUST be complete and functional
-- NEVER extract code from markdown blocks in the context
-- ONLY use the tools to read and write code
+3. ✅ STEP 3: Call write_code_file(content) with your NEW architecture
+   - content = your complete, improved Python architecture code
+   - content must be DIFFERENT from what you read (substantial changes)
+   - content must be valid, complete Python (imports, classes, methods)
+   - content must NOT contain markdown markers or fallback comments
 
-FAILURE TO FOLLOW THESE STEPS EXACTLY MEANS YOU HAVE FAILED THE TASK.""",
+4. ✅ STEP 4: Provide name and motivation
+
+🔥 CRITICAL SUCCESS CRITERIA:
+- You MUST call read_code_file() first
+- You MUST call write_code_file() with MODIFIED code  
+- The written code MUST be substantially different from input
+- The written code MUST be complete, valid Python
+- You MUST NOT include any "fallback" or "unchanged" comments
+
+🚫 FAILURE CONDITIONS (These mean you FAILED):
+- Not calling read_code_file()
+- Not calling write_code_file() 
+- Writing identical or nearly identical code
+- Including fallback/unchanged comments
+- Writing invalid Python code
+- Using code from context instead of read_code_file()
+
+💡 TOOL USAGE VALIDATION:
+- The system will verify you called both tools
+- The system will verify the output file is actually changed
+- If you don't use tools properly, you will be retried
+- After maximum retries, evolution will fail completely
+
+SUCCESS = Tools used properly + Architecture actually improved + Valid Python written
+FAILURE = Any deviation from tool usage requirements
+
+BEGIN BY CALLING read_code_file() NOW.""",
     output_type=PlannerOutput,
-    model='o3',
+    model=Config.OPENAI_MODEL,
     tools=[read_code_file, write_code_file]
 )
