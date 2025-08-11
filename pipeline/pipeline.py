@@ -9,11 +9,82 @@ from database import program_sample, update
 from eval import evaluation
 from evolve import evolve
 from utils.agent_logger import end_pipeline, log_error, log_info, log_step, log_warning, start_pipeline
+from model_adapters import ModelClientManager, ModelAdapterFactory, get_service_manager
 
-client = AsyncOpenAI(
+# Initialize the unified model client manager
+client_manager = ModelClientManager(
     api_key=Config.OPENAI_API_KEY,
-    base_url=Config.OPENAI_BASE_URL
+    base_url=Config.OPENAI_BASE_URL,
+    default_model=Config.OPENAI_MODEL,
+    force_harmony=Config.FORCE_HARMONY_MODE,
+    auto_start_services=Config.AUTO_START_HARMONY_SERVICES
 )
+
+# Add any additional harmony patterns from config
+if Config.HARMONY_MODEL_PATTERNS:
+    for pattern in Config.HARMONY_MODEL_PATTERNS:
+        ModelAdapterFactory.add_harmony_pattern(pattern)
+
+# Configure harmony service defaults from config
+from model_adapters import HarmonyServiceConfig
+if hasattr(Config, 'HARMONY_SERVICE_HOST') and Config.OPENAI_MODEL:
+    # Register default service configuration for the main model if it's a harmony model
+    if ModelAdapterFactory._is_harmony_model(Config.OPENAI_MODEL):
+        # Create custom command if specified in config
+        command = None
+        if Config.HARMONY_SERVICE_COMMAND:
+            command = [
+                arg.format(
+                    model=Config.OPENAI_MODEL,
+                    port=Config.HARMONY_SERVICE_PORT_START,
+                    host=Config.HARMONY_SERVICE_HOST
+                ) 
+                for arg in Config.HARMONY_SERVICE_COMMAND
+            ]
+        
+        # Create service configuration
+        service_config = HarmonyServiceConfig(
+            model=Config.OPENAI_MODEL,
+            host=Config.HARMONY_SERVICE_HOST,
+            port=Config.HARMONY_SERVICE_PORT_START,
+            command=command or [
+                "python", "-m", "harmony_service",
+                "--model", Config.OPENAI_MODEL,
+                "--host", Config.HARMONY_SERVICE_HOST,
+                "--port", str(Config.HARMONY_SERVICE_PORT_START),
+                "--timeout", "300"
+            ],
+            working_dir=Config.HARMONY_SERVICE_WORKING_DIR or None,
+            environment=Config.HARMONY_SERVICE_ENVIRONMENT,
+            startup_timeout=Config.HARMONY_SERVICE_STARTUP_TIMEOUT,
+            health_check_timeout=Config.HARMONY_SERVICE_HEALTH_TIMEOUT,
+            shutdown_timeout=Config.HARMONY_SERVICE_SHUTDOWN_TIMEOUT
+        )
+        
+        # Register the configuration
+        ModelAdapterFactory.register_service_config(service_config)
+        log_info(f"Registered harmony service configuration for model: {Config.OPENAI_MODEL}")
+
+# For backward compatibility with agents library, create a wrapper that looks like AsyncOpenAI
+class AsyncOpenAICompatWrapper:
+    """Wrapper to maintain compatibility with agents library expectations."""
+    
+    def __init__(self, client_manager: ModelClientManager):
+        self.client_manager = client_manager
+        self.chat = client_manager.chat
+        
+        # Mirror important AsyncOpenAI properties for compatibility
+        self.api_key = client_manager.api_key
+        self.base_url = client_manager.base_url
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+# Create the compatibility wrapper
+client = AsyncOpenAICompatWrapper(client_manager)
 
 set_default_openai_client(client)
 set_default_openai_api("chat_completions") 
@@ -77,35 +148,82 @@ async def run_single_experiment() -> bool:
 
 
 async def main():
-    """Main function - continuous experiment execution."""
+    """Main function - continuous experiment execution with service management."""
     set_tracing_disabled(True)
     
     log_info("Starting continuous experiment pipeline...")
+    
+    # Initialize service status tracking
+    service_status = await client_manager.get_service_status()
+    if service_status:
+        log_info(f"Detected harmony services: {list(service_status.keys())}")
     
     # Run plot.py first
     log_info("Running plot scripts...")
     log_info("Plot scripts completed")
     
     experiment_count = 0
-    while True:
-        try:
-            experiment_count += 1
-            log_info(f"Starting experiment {experiment_count}")
-            
-            success = await run_single_experiment()
-            if success:
-                log_info(f"Experiment {experiment_count} completed successfully, starting next experiment...")
-            else:
-                log_warning(f"Experiment {experiment_count} failed, retrying in 60 seconds...")
-                await asyncio.sleep(60)
+    service_manager = get_service_manager()
+    
+    try:
+        while True:
+            # Check if shutdown was requested via signal
+            if service_manager.is_shutdown_requested():
+                log_warning("Shutdown requested via signal, stopping pipeline")
+                break
                 
-        except KeyboardInterrupt:
-            log_warning("Continuous experiment interrupted by user")
-            break
+            try:
+                experiment_count += 1
+                log_info(f"Starting experiment {experiment_count}")
+                
+                success = await run_single_experiment()
+                if success:
+                    log_info(f"Experiment {experiment_count} completed successfully, starting next experiment...")
+                else:
+                    log_warning(f"Experiment {experiment_count} failed, retrying in 60 seconds...")
+                    # Check for shutdown during sleep
+                    for _ in range(60):
+                        if service_manager.is_shutdown_requested():
+                            log_warning("Shutdown requested during retry wait")
+                            break
+                        await asyncio.sleep(1)
+                    
+            except KeyboardInterrupt:
+                log_warning("Continuous experiment interrupted by user")
+                # Ensure signal is propagated to service manager
+                if service_manager:
+                    await service_manager.request_shutdown()
+                break
+            except Exception as e:
+                log_error(f"Main loop unexpected error: {e}")
+                log_info("Retrying in 60 seconds...")
+                # Check for shutdown during sleep
+                for _ in range(60):
+                    if service_manager.is_shutdown_requested():
+                        log_warning("Shutdown requested during error retry wait")
+                        break
+                    await asyncio.sleep(1)
+    
+    except KeyboardInterrupt:
+        log_warning("Main pipeline interrupted by user")
+        # Ensure signal is propagated to service manager
+        if service_manager:
+            await service_manager.request_shutdown()
+    
+    finally:
+        # Cleanup harmony services when shutting down
+        log_info("Shutting down pipeline, cleaning up services...")
+        try:
+            if client_manager:
+                cleanup_success = await client_manager.shutdown_managed_services()
+                if cleanup_success:
+                    log_info("Harmony services shut down successfully")
+                else:
+                    log_warning("Some harmony services may not have shut down cleanly")
         except Exception as e:
-            log_error(f"Main loop unexpected error: {e}")
-            log_info("Retrying in 60 seconds...")
-            await asyncio.sleep(60)
+            log_error(f"Error during service cleanup: {e}")
+        
+        log_info("Pipeline shutdown complete")
 
 
 if __name__ == "__main__":

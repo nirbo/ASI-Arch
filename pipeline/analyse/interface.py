@@ -165,7 +165,8 @@ async def run_analyzer(
             analyzer_result = await log_agent_run(
                 "analyzer",
                 analyzer,
-                Analyzer_input(name, result_content, motivation, ref_context)
+                Analyzer_input(name, result_content, motivation, ref_context),
+                max_turns=Config.MAX_TURNS_ANALYZER
             )
             return analyzer_result.final_output
             

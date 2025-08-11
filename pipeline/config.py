@@ -33,5 +33,52 @@ class Config:
     OPENAI_BASE_URL: str = "http://localhost:11434/v1"  # Default OpenAI, change for other providers
     OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
+    # Model Adapter Configuration
+    # Set to True to force Harmony adapter, False for Standard adapter, None for auto-detection
+    FORCE_HARMONY_MODE: bool | None = None  # Auto-detect based on model name
+    
+    # Harmony Model Configuration
+    # Additional patterns to detect Harmony models (beyond default gpt-oss patterns)
+    HARMONY_MODEL_PATTERNS: list[str] = []  # e.g., ["custom-harmony-model", "local-gpt-oss"]
+    
+    # Harmony Service Configuration
+    # Whether to automatically start harmony services when harmony models are detected
+    # Set to False since we use openai-harmony library directly, not a separate service
+    AUTO_START_HARMONY_SERVICES: bool = False
+    
+    # Default harmony service configuration
+    HARMONY_SERVICE_HOST: str = "localhost"
+    HARMONY_SERVICE_PORT_START: int = 8080  # Starting port for harmony services
+    HARMONY_SERVICE_STARTUP_TIMEOUT: float = 120.0  # Seconds to wait for service startup
+    HARMONY_SERVICE_HEALTH_TIMEOUT: float = 10.0  # Seconds for health check timeout
+    HARMONY_SERVICE_SHUTDOWN_TIMEOUT: float = 30.0  # Seconds to wait for graceful shutdown
+    
+    # Custom harmony service command (leave empty for default openai-harmony service)
+    HARMONY_SERVICE_COMMAND: list[str] = []
+    
+    # Environment variables for harmony service processes
+    HARMONY_SERVICE_ENVIRONMENT: dict[str, str] = {}
+    
+    # Working directory for harmony service processes (leave empty for current directory)
+    HARMONY_SERVICE_WORKING_DIR: str = ""
+    
     # Embedding Model Configuration
     EMBEDDING_MODEL: str = "doubao-embedding-large-text-240915"  # Embedding model for vector search
+    
+    # Agent Turn Limits Configuration
+    # These control how many conversation turns each agent can have before timing out
+    # Higher values allow more complex reasoning but take longer to complete
+    
+    # Evolution agents (most complex architectural tasks)
+    MAX_TURNS_PLANNER: int = 100          # Architecture design and innovation
+    MAX_TURNS_DEDUPLICATION: int = 100    # Analysis and differentiation from existing work
+    MAX_TURNS_MOTIVATION_CHECKER: int = 100  # Motivation comparison and uniqueness validation
+    MAX_TURNS_CODE_CHECKER: int = 100    # Code validation and correctness checking (already set)
+    
+    # Analysis agents
+    MAX_TURNS_ANALYZER: int = 100         # Comprehensive result analysis and interpretation
+    MAX_TURNS_SUMMARIZER: int = 100       # Context summarization for database elements (increased for complex synthesis)
+    
+    # Training and debugging agents
+    MAX_TURNS_TRAINER: int = 100          # Training script execution and monitoring
+    MAX_TURNS_DEBUGGER: int = 100         # Error analysis and code fixing

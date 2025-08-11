@@ -76,12 +76,13 @@ async def gen(context: str) -> Tuple[str, str]:
             plan = None
             if attempt == 0 or repeated_result is None:
                 input = Planner_input(context)
-                plan = await log_agent_run("planner", planner, input)
+                plan = await log_agent_run("planner", planner, input, max_turns=Config.MAX_TURNS_PLANNER)
             else:
                 repeated_context = get_repeated_context(repeated_result.repeated_index)
                 input = Deduplication_input(context, repeated_context)
-                plan = await log_agent_run("deduplication", deduplication, input)
+                plan = await log_agent_run("deduplication", deduplication, input, max_turns=Config.MAX_TURNS_DEDUPLICATION)
             
+            print(f"DEBUG: Agent plan output:\n{plan}")
             # Validate that the agent actually provided output
             if not plan:
                 print(f"❌ Agent failed to provide output on attempt {attempt + 1}")
@@ -158,7 +159,7 @@ async def check_code_correctness(motivation) -> bool:
                 "code_checker",
                 code_checker,
                 CodeChecker_input(motivation=motivation),
-                max_turns=100
+                max_turns=Config.MAX_TURNS_CODE_CHECKER
             )
             
             if code_checker_result.final_output.success:
@@ -184,7 +185,7 @@ async def check_repeated_motivation(motivation: str):
     similar_elements = client.search_similar_motivations(motivation)
     context = similar_motivation_context(similar_elements)
     input = Motivation_checker_input(context, motivation)
-    repeated_result = await log_agent_run("motivation_checker", motivation_checker, input)
+    repeated_result = await log_agent_run("motivation_checker", motivation_checker, input, max_turns=Config.MAX_TURNS_MOTIVATION_CHECKER)
     return repeated_result.final_output
 
 

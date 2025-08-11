@@ -46,7 +46,8 @@ async def run_training(name: str, motivation: str) -> Tuple[bool, str]:
                 debug_result = await log_agent_run(
                     "debugger",
                     debugger,
-                    Debugger_input(motivation, previous_error)
+                    Debugger_input(motivation, previous_error),
+                    max_turns=Config.MAX_TURNS_DEBUGGER
                 )
                 
                 changes_made = debug_result.final_output.changes_made
@@ -57,7 +58,8 @@ async def run_training(name: str, motivation: str) -> Tuple[bool, str]:
                 trainer,
                 f"""Please run the training script for architecture: {name}
                 Use the run_training_script tool with the architecture name as parameter.
-                Return success=True only if the training completes successfully."""
+                Return success=True only if the training completes successfully.""",
+                max_turns=Config.MAX_TURNS_TRAINER
             )
             
             if train_result.final_output.success:
