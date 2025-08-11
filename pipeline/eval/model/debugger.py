@@ -1,6 +1,7 @@
 from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file, write_code_file
+from config import Config
 
 class DebuggerOutput(BaseModel):
     changes_made: str
@@ -86,6 +87,6 @@ debugger = Agent(
 Provide a concise description of what was changed to fix the training error, focusing on whether it was a runtime fix or complexity optimization.""",
     
     output_type=DebuggerOutput,
-    model='gpt-4.1',
+    model=Config.OPENAI_MODEL,
     tools=[read_code_file, write_code_file]
 )

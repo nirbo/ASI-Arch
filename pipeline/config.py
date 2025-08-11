@@ -30,5 +30,8 @@ class Config:
     
     # OpenAI API Configuration
     OPENAI_API_KEY: str = "dummy"
-    OPENAI_BASE_URL: str = "http://192.168.100.100:1234/v1"  # Default OpenAI, change for other providers
-    OPENAI_MODEL: str = "deepseek-r1-0528-qwen3-8b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    OPENAI_BASE_URL: str = "http://localhost:11434/v1"  # Default OpenAI, change for other providers
+    OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    
+    # Embedding Model Configuration
+    EMBEDDING_MODEL: str = "doubao-embedding-large-text-240915"  # Embedding model for vector search

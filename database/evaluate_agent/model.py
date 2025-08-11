@@ -1,6 +1,7 @@
 from agents import Agent
 from pydantic import BaseModel
 from openai import AsyncAzureOpenAI
+from config import Config
 
 
 class ModelJudgementOutput(BaseModel):
@@ -54,6 +55,6 @@ model_judger = Agent(
 Remember: Your goal is to create meaningful differentiation between models, not to give everyone a "good" score.""",
     
     output_type=ModelJudgementOutput,  
-    model='gpt-4.1',
+    model=Config.OPENAI_MODEL,
     tools=[],
 )

@@ -4,6 +4,17 @@ from typing import List, Optional
 
 import requests
 
+# Import Config - handle import path differences
+try:
+    from config import Config
+except ImportError:
+    try:
+        from pipeline.config import Config
+    except ImportError:
+        # Fallback if config can't be imported
+        class Config:
+            EMBEDDING_MODEL = "doubao-embedding-large-text-240915"
+
 
 class EmbeddingService:
     """Embedding service client for calling remote API to compute text vectors."""
@@ -20,7 +31,7 @@ class EmbeddingService:
             raise ValueError("Please set ARK_API_KEY environment variable or provide api_key parameter")
         
         self.base_url = "https://ark.cn-beijing.volces.com/api/v3/embeddings"
-        self.model = "doubao-embedding-large-text-240915"
+        self.model = Config.EMBEDDING_MODEL
         self.logger = logging.getLogger(__name__)
         
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:

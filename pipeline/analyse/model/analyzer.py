@@ -1,6 +1,7 @@
 from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file
+from config import Config
 
 
 class AnalyzerOutput(BaseModel):
@@ -114,6 +115,6 @@ Remember: Your goal is to understand the relationship between architectural desi
 
 """,
     output_type=AnalyzerOutput,
-    model='o3',
+    model=Config.OPENAI_MODEL,
     tools=[read_code_file]
 )

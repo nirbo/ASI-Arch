@@ -1,5 +1,6 @@
 from agents import Agent
 from pydantic import BaseModel
+from config import Config
 
 class SummaryOutput(BaseModel):
     experience: str
@@ -76,6 +77,6 @@ Your experience synthesis should enable the Planner to:
 - Avoid repeating unsuccessful approaches from previous iterations""",
     
     output_type=SummaryOutput,
-    model='gpt-4.1',
+    model=Config.OPENAI_MODEL,
     tools=[]
 )

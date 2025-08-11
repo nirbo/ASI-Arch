@@ -1,6 +1,7 @@
 from agents import Agent
 from pydantic import BaseModel
 from tools import run_training_script
+from config import Config
 
 class TrainingResultOutput(BaseModel):
     success: bool
@@ -30,5 +31,5 @@ trainer = Agent(
     If success=False, provide detailed error analysis from stderr/stdout with specific error messages.""",
     tools=[run_training_script],
     output_type=TrainingResultOutput,
-    model="gpt-4.1"
+    model=Config.OPENAI_MODEL
 )
