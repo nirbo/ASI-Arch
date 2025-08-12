@@ -34,7 +34,7 @@ class Config:
     OPENAI_MODEL: str = "magistral"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
     # Openrouter
-    # OPENAI_API_KEY: str = "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"
+    # OPENAI_API_KEY: str = ""
     # OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
     # OPENAI_MODEL: str = "deepseek/deepseek-chat-v3-0324:free"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
