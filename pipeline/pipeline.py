@@ -1,15 +1,28 @@
 import asyncio
+import sys
+import os
+import logging
+
+# Add the parent directory to sys.path to allow imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Reduce noise from HTTP libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+
+# Import agents configuration before any agents are created
+from pipeline.agents_config import patch_agents_multi_provider
 
 from agents import set_default_openai_api, set_default_openai_client, set_tracing_disabled
 from openai import AsyncOpenAI
 
-from analyse import analyse
-from config import Config
-from database import program_sample, update
-from eval import evaluation
-from evolve import evolve
-from utils.agent_logger import end_pipeline, log_error, log_info, log_step, log_warning, start_pipeline
-from model_adapters import ModelClientManager, ModelAdapterFactory, get_service_manager
+from pipeline.analyse import analyse
+from pipeline.config import Config
+from pipeline.database import program_sample, update
+from pipeline.eval import evaluation
+from pipeline.evolve import evolve
+from pipeline.utils.agent_logger import end_pipeline, log_error, log_info, log_step, log_warning, start_pipeline
+from pipeline.model_adapters import ModelClientManager, ModelAdapterFactory, get_service_manager
 
 # Initialize the unified model client manager
 client_manager = ModelClientManager(
@@ -26,7 +39,7 @@ if Config.HARMONY_MODEL_PATTERNS:
         ModelAdapterFactory.add_harmony_pattern(pattern)
 
 # Configure harmony service defaults from config
-from model_adapters import HarmonyServiceConfig
+from pipeline.model_adapters import HarmonyServiceConfig
 if hasattr(Config, 'HARMONY_SERVICE_HOST') and Config.OPENAI_MODEL:
     # Register default service configuration for the main model if it's a harmony model
     if ModelAdapterFactory._is_harmony_model(Config.OPENAI_MODEL):
@@ -66,16 +79,25 @@ if hasattr(Config, 'HARMONY_SERVICE_HOST') and Config.OPENAI_MODEL:
         log_info(f"Registered harmony service configuration for model: {Config.OPENAI_MODEL}")
 
 # For backward compatibility with agents library, create a wrapper that looks like AsyncOpenAI
+
+
+
 class AsyncOpenAICompatWrapper:
     """Wrapper to maintain compatibility with agents library expectations."""
     
     def __init__(self, client_manager: ModelClientManager):
         self.client_manager = client_manager
+        
+        # Use the existing chat manager from ModelClientManager
         self.chat = client_manager.chat
         
         # Mirror important AsyncOpenAI properties for compatibility
         self.api_key = client_manager.api_key
         self.base_url = client_manager.base_url
+        
+        # For compatibility - agents library may still check for responses attribute
+        # but should use chat.completions.create when API is set to "chat_completions"
+        self.responses = None
     
     async def __aenter__(self):
         return self
@@ -163,12 +185,15 @@ async def main():
     log_info("Plot scripts completed")
     
     experiment_count = 0
-    service_manager = get_service_manager()
+    # Only initialize service manager for harmony models that actually need it
+    service_manager = None
+    if ModelAdapterFactory._is_harmony_model(Config.OPENAI_MODEL):
+        service_manager = get_service_manager()
     
     try:
         while True:
-            # Check if shutdown was requested via signal
-            if service_manager.is_shutdown_requested():
+            # Check if shutdown was requested via signal (only for harmony models)
+            if service_manager and service_manager.is_shutdown_requested():
                 log_warning("Shutdown requested via signal, stopping pipeline")
                 break
                 
@@ -180,10 +205,10 @@ async def main():
                 if success:
                     log_info(f"Experiment {experiment_count} completed successfully, starting next experiment...")
                 else:
-                    log_warning(f"Experiment {experiment_count} failed, retrying in 60 seconds...")
+                    log_warning(f"Experiment {experiment_count} failed, retrying in {Config.RETRY_INTERVAL} seconds...")
                     # Check for shutdown during sleep
-                    for _ in range(60):
-                        if service_manager.is_shutdown_requested():
+                    for _ in range(Config.RETRY_INTERVAL):
+                        if service_manager and service_manager.is_shutdown_requested():
                             log_warning("Shutdown requested during retry wait")
                             break
                         await asyncio.sleep(1)
@@ -199,7 +224,7 @@ async def main():
                 log_info("Retrying in 60 seconds...")
                 # Check for shutdown during sleep
                 for _ in range(60):
-                    if service_manager.is_shutdown_requested():
+                    if service_manager and service_manager.is_shutdown_requested():
                         log_warning("Shutdown requested during error retry wait")
                         break
                     await asyncio.sleep(1)

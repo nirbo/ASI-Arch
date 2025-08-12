@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from config import Config
+from ..config import Config
 from .element import DataElement
 from .mongo_database import create_client
 

@@ -110,7 +110,21 @@ class HarmonyServiceManager:
             # Signal handling might not be available in all contexts
             pass
         
-        logger.info("Initialized HarmonyServiceManager")
+        # Only log initialization if we actually expect to use harmony services
+        # Check if any models in the current configuration might need harmony services
+        try:
+            from ..config import Config
+            if hasattr(Config, 'OPENAI_MODEL') and Config.OPENAI_MODEL:
+                # Import factory here to avoid circular imports
+                from .factory import ModelAdapterFactory
+                if ModelAdapterFactory._is_harmony_model(Config.OPENAI_MODEL):
+                    logger.info("Initialized HarmonyServiceManager for harmony model")
+                else:
+                    logger.debug("Initialized HarmonyServiceManager for signal handling (no harmony services needed)")
+            else:
+                logger.debug("Initialized HarmonyServiceManager (no model configured)")
+        except ImportError:
+            logger.debug("Initialized HarmonyServiceManager")
     
     def _signal_handler(self, signum, frame):
         """Handle system signals for graceful shutdown."""

@@ -344,6 +344,17 @@ class ChatCompletionsManager:
             logger.error(f"Error in chat completion creation: {str(e)}")
             raise
 
+def get_custom_agent(name, instructions, output_type, model, tools):
+    """Create a custom agent that uses our client manager"""
+    from agents import Agent
+    return Agent(
+        name=name,
+        instructions=instructions,
+        output_type=output_type,
+        model=model,
+        tools=tools
+    )
+
 
 class AsyncModelClientManager(ModelClientManager):
     """

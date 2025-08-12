@@ -28,14 +28,19 @@ class Config:
     # Database URL
     DATABASE: str = "http://localhost:8001"
     
-    # OpenAI API Configuration
+    # Local Model
     OPENAI_API_KEY: str = "dummy"
     OPENAI_BASE_URL: str = "http://localhost:11434/v1"  # Default OpenAI, change for other providers
-    OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    OPENAI_MODEL: str = "magistral"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    
+    # Openrouter
+    # OPENAI_API_KEY: str = "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"
+    # OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
+    # OPENAI_MODEL: str = "deepseek/deepseek-chat-v3-0324:free"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
     # Model Adapter Configuration
     # Set to True to force Harmony adapter, False for Standard adapter, None for auto-detection
-    FORCE_HARMONY_MODE: bool | None = None  # Auto-detect based on model name
+    FORCE_HARMONY_MODE: bool | None = None  # Auto-detect: gpt-oss models use Harmony, others use Standard
     
     # Harmony Model Configuration
     # Additional patterns to detect Harmony models (beyond default gpt-oss patterns)
@@ -70,15 +75,17 @@ class Config:
     # Higher values allow more complex reasoning but take longer to complete
     
     # Evolution agents (most complex architectural tasks)
-    MAX_TURNS_PLANNER: int = 100          # Architecture design and innovation
-    MAX_TURNS_DEDUPLICATION: int = 100    # Analysis and differentiation from existing work
-    MAX_TURNS_MOTIVATION_CHECKER: int = 100  # Motivation comparison and uniqueness validation
-    MAX_TURNS_CODE_CHECKER: int = 100    # Code validation and correctness checking (already set)
+    MAX_TURNS_PLANNER: int = 50          # Architecture design and innovation
+    MAX_TURNS_DEDUPLICATION: int = 50    # Analysis and differentiation from existing work
+    MAX_TURNS_MOTIVATION_CHECKER: int = 50  # Motivation comparison and uniqueness validation
+    MAX_TURNS_CODE_CHECKER: int = 50    # Code validation and correctness checking (already set)
     
     # Analysis agents
-    MAX_TURNS_ANALYZER: int = 100         # Comprehensive result analysis and interpretation
-    MAX_TURNS_SUMMARIZER: int = 100       # Context summarization for database elements (increased for complex synthesis)
+    MAX_TURNS_ANALYZER: int = 50         # Comprehensive result analysis and interpretation
+    MAX_TURNS_SUMMARIZER: int = 50       # Context summarization for database elements (increased for complex synthesis)
     
     # Training and debugging agents
-    MAX_TURNS_TRAINER: int = 100          # Training script execution and monitoring
-    MAX_TURNS_DEBUGGER: int = 100         # Error analysis and code fixing
+    MAX_TURNS_TRAINER: int = 50          # Training script execution and monitoring
+    MAX_TURNS_DEBUGGER: int = 50         # Error analysis and code fixing
+
+    RETRY_INTERVAL: int = 5

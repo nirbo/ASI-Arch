@@ -2,9 +2,9 @@ from .prompt import Planner_input, Motivation_checker_input, Deduplication_input
 from .model import planner, motivation_checker, deduplication, code_checker
 from agents import exceptions, set_tracing_disabled
 from typing import List, Tuple
-from config import Config
-from database.mongo_database import create_client
-from utils.agent_logger import log_agent_run
+from ..config import Config
+from ..database.mongo_database import create_client
+from ..utils.agent_logger import log_agent_run, log_info, log_warning, log_error
 import re
 
 def parse_planner_response(response_text: str) -> Tuple[str, str]:
@@ -70,7 +70,9 @@ async def gen(context: str) -> Tuple[str, str]:
                 print(f"⚠️  File restoration failed on attempt {attempt + 1}")
                 continue
             
-            print(f"✅ Starting evolution attempt {attempt + 1}, file restored to {len(original_source)} characters")
+            message = f"🔄 Evolution attempt {attempt + 1}"
+            print(message)
+            log_info(message)
             
             # Use different prompt based on whether it's repeated
             plan = None
@@ -82,7 +84,6 @@ async def gen(context: str) -> Tuple[str, str]:
                 input = Deduplication_input(context, repeated_context)
                 plan = await log_agent_run("deduplication", deduplication, input, max_turns=Config.MAX_TURNS_DEDUPLICATION)
             
-            print(f"DEBUG: Agent plan output:\n{plan}")
             # Validate that the agent actually provided output
             if not plan:
                 print(f"❌ Agent failed to provide output on attempt {attempt + 1}")
@@ -93,9 +94,24 @@ async def gen(context: str) -> Tuple[str, str]:
             response_text = str(plan)
             name, motivation = parse_planner_response(response_text)
             
+            # Try to extract from final_output if available
+            if hasattr(plan, 'final_output') and plan.final_output:
+                try:
+                    if hasattr(plan.final_output, 'name') and hasattr(plan.final_output, 'motivation'):
+                        name = plan.final_output.name
+                        motivation = plan.final_output.motivation
+                except:
+                    pass  # Use parsed values as fallback
+            
+            message = f"🧠 Agent plan: {name} - {motivation[:100]}{'...' if len(motivation) > 100 else ''}"
+            print(message)
+            log_info(message)
+            
             # Validate that we got meaningful output
             if not name or not motivation or name.strip() == "" or motivation.strip() == "":
-                print(f"❌ Agent provided empty name or motivation on attempt {attempt + 1}")
+                message = f"❌ Agent provided empty name or motivation on attempt {attempt + 1}"
+                print(message)
+                log_warning(message)
                 repeated_result = None  # Reset for non-repetition retry
                 continue
             
@@ -108,17 +124,21 @@ async def gen(context: str) -> Tuple[str, str]:
             meaningful_changes = len(final_content) != len(original_source) or final_content != original_source
             
             if not tool_usage_success:
-                print(f"❌ CRITICAL: Agent failed to use write_code_file tool on attempt {attempt + 1}")
-                print(f"   File unchanged: {len(original_source)} chars -> {len(final_content)} chars")
-                print(f"   This means the agent ignored tool usage requirements")
+                message = f"❌ Agent failed to use write_code_file tool on attempt {attempt + 1}"
+                print(message)
+                log_warning(message)
                 
                 # FORCE RETRY - DO NOT use fallback for tool usage failures
                 if attempt < Config.MAX_RETRY_ATTEMPTS - 1:
-                    print(f"   🔄 Forcing retry {attempt + 2} - agent MUST use write_code_file")
+                    retry_message = f"🔄 Forcing retry {attempt + 2} - agent MUST use write_code_file"
+                    print(retry_message)
+                    log_info(retry_message)
                     repeated_result = None  # Reset for non-repetition retry
                     continue
                 else:
-                    print(f"   ❌ EVOLUTION FAILURE: Agent consistently failed to use tools after {Config.MAX_RETRY_ATTEMPTS} attempts")
+                    error_message = f"❌ EVOLUTION FAILURE: Agent consistently failed to use tools after {Config.MAX_RETRY_ATTEMPTS} attempts"
+                    print(error_message)
+                    log_error(error_message)
                     raise Exception(f"Evolution failed: Agent refused to use write_code_file tool after {Config.MAX_RETRY_ATTEMPTS} attempts")
             
             # Validate the changes are meaningful (not just fallback comments)
@@ -130,8 +150,9 @@ async def gen(context: str) -> Tuple[str, str]:
                     repeated_result = None  # Reset for non-repetition retry
                     continue
                     
-            print(f"✅ Agent successfully used write_code_file: {len(original_source)} -> {len(final_content)} chars")
-            print(f"   Content validation: {'meaningful changes detected' if meaningful_changes else 'identical content'}")
+            message = f"✅ Agent successfully generated new architecture ({len(final_content)} chars)"
+            print(message)
+            log_info(message)
             
             repeated_result = await check_repeated_motivation(motivation)
             if repeated_result.is_repeated:

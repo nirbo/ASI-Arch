@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from config import Config
-from database.element import DataElement
+from ..config import Config
+from .element import DataElement
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

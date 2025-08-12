@@ -1,8 +1,8 @@
 import os
 from typing import Tuple
 
-from config import Config
-from utils.agent_logger import log_agent_run
+from ..config import Config
+from ..utils.agent_logger import log_agent_run
 from .model import debugger, trainer
 from .prompts import Debugger_input
 

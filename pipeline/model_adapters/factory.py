@@ -177,13 +177,8 @@ class ModelAdapterFactory:
         if model_lower in cls.HARMONY_MODEL_PATTERNS:
             return True
         
-        # Check partial matches
-        for pattern in cls.HARMONY_MODEL_PATTERNS:
-            if pattern in model_lower:
-                return True
-        
-        # Check for gpt-oss prefix
-        if model_lower.startswith('gpt-oss'):
+        # Check for gpt-oss prefix (but not for OpenRouter models which have / in them)
+        if model_lower.startswith('gpt-oss') and '/' not in model_lower:
             return True
         
         return False
