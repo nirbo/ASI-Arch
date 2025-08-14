@@ -256,12 +256,444 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 logger.warning(f"Unsloth harmony encoding not available: {e}")
         return self._unsloth_available
     
+    def _is_local_harmony_host(self, base_url: str) -> bool:
+        """Check if base_url is a local host that should use simplified harmony encoding."""
+        if not base_url:
+            return False
+            
+        from pipeline.config import Config
+        from urllib.parse import urlparse
+        
+        try:
+            parsed = urlparse(base_url)
+            hostname = parsed.hostname or ""
+            return hostname in Config.LOCAL_HARMONY_HOSTS
+        except Exception:
+            # Fallback to simple string matching if URL parsing fails
+            return any(host in base_url for host in Config.LOCAL_HARMONY_HOSTS)
+    
+    async def _chat_completions_create_harmony_local(self, **kwargs):
+        """Simplified harmony encoding for local models using unsloth_zoo directly."""
+        from unsloth_zoo import encode_conversations_with_harmony
+        from pipeline.config import Config
+        import openai
+        
+        try:
+            messages = kwargs.get('messages', [])
+            model = kwargs.get('model', '')
+            max_tokens = kwargs.get('max_tokens', Config.HARMONY_MAX_TOKENS)
+            temperature = kwargs.get('temperature', 0.7)
+            tools = kwargs.get('tools')
+            agent_type = kwargs.get('agent_type', None)  # Get agent type from caller
+            
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.info(f"🔧 LOCAL HARMONY: Using simplified unsloth_zoo for {model}")
+                logger.info(f"🔧 LOCAL HARMONY: base_url = {kwargs.get('base_url')}")
+                logger.info(f"🔧 LOCAL HARMONY: api_key = {kwargs.get('api_key')}")
+                
+            # Use unsloth_zoo parameters directly as documented
+            # Set developer_instructions based on agent type
+            developer_instructions = None
+            if agent_type == "planner":
+                developer_instructions = "You are an Architecture Designer. Provide your reasoning in the analysis channel, then output a JSON object with 'name', 'motivation', and 'code' fields in the final channel."
+            elif agent_type == "summarizer":
+                developer_instructions = "You are a research summarizer. Provide your analysis in the analysis channel, then output a JSON object with an 'experience' field in the final channel."
+            elif agent_type == "analyzer":
+                developer_instructions = "You are an architecture analyzer. Provide your reasoning in the analysis channel, then output a JSON object with design_evaluation, experimental_results_analysis, expectation_vs_reality_comparison, theoretical_explanation_with_evidence, and synthesis_and_insights fields in the final channel."
+            elif agent_type in ["trainer", "code_checker"]:
+                developer_instructions = f"You are a {agent_type}. Provide your analysis in the analysis channel, then output a JSON object with 'success' and 'error' fields in the final channel."
+            elif agent_type == "debugger":
+                developer_instructions = "You are a debugging expert. Provide your analysis in the analysis channel, then output a JSON object with 'changes_made' field in the final channel."
+            elif agent_type == "deduplication":
+                developer_instructions = "You are an innovation diversifier. Provide your analysis in the analysis channel, then output a JSON object with 'name', 'motivation', and 'code' fields in the final channel."
+            elif agent_type == "motivation_checker":
+                developer_instructions = "You are a motivation checker. Provide your analysis in the analysis channel, then output a JSON object with 'is_repeated', 'repeated_index', and 'judgement_reason' fields in the final channel."
+            else:
+                developer_instructions = "Provide your reasoning in the analysis channel, then output your structured response in the final channel."
+            
+            harmony_params = {
+                'messages': messages,
+                'reasoning_effort': Config.HARMONY_REASONING_EFFORT.lower(),
+                'add_generation_prompt': True,
+                'developer_instructions': developer_instructions,
+                'model_identity': f"You are an expert AI assistant specialized in neural architecture research as a {agent_type or 'general'} agent."
+            }
+            
+            # Add tools if provided
+            if tools:
+                harmony_params['tool_calls'] = tools
+                
+            # Create the harmony-encoded conversation
+            encoded_result = encode_conversations_with_harmony(**harmony_params)
+            
+            # Handle tuple return from unsloth_zoo - take the first element which should be the encoded text
+            if isinstance(encoded_result, tuple):
+                encoded_conversation = encoded_result[0] if len(encoded_result) > 0 else ""
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.info(f"🔧 LOCAL HARMONY: Got tuple from unsloth_zoo, using first element")
+            else:
+                encoded_conversation = encoded_result
+            
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.info(f"✅ LOCAL HARMONY: Successfully encoded conversation")
+                logger.info(f"🔧 LOCAL HARMONY: Harmony params = {harmony_params.keys()}")
+                logger.info(f"🔧 LOCAL HARMONY: Final encoded type = {type(encoded_conversation)}")
+                if hasattr(encoded_conversation, '__len__'):
+                    logger.info(f"🔧 LOCAL HARMONY: Final encoded length = {len(encoded_conversation)}")
+                if isinstance(encoded_conversation, str) and len(encoded_conversation) < 500:
+                    logger.info(f"🔧 LOCAL HARMONY: Encoded content preview = '{encoded_conversation[:200]}...'")
+                else:
+                    logger.info(f"🔧 LOCAL HARMONY: Long encoded conversation ready for model")
+                
+            # Make direct API call to local server - get config directly since kwargs doesn't have them
+            api_key = kwargs.get('api_key') or Config.OPENAI_API_KEY
+            base_url = kwargs.get('base_url') or Config.OPENAI_BASE_URL
+            
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.info(f"🔧 LOCAL HARMONY: Using api_key from config = {api_key}")
+                logger.info(f"🔧 LOCAL HARMONY: Using base_url from config = {base_url}")
+            
+            client = openai.AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url
+            )
+            
+            # For local harmony models, send the encoded conversation directly as a completion
+            # The unsloth_zoo already formatted it properly for the model
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.info(f"🔧 LOCAL HARMONY: Sending harmony-encoded conversation length = {len(encoded_conversation)}")
+                
+            # Try completion API first (more direct for harmony format)
+            try:
+                response = await client.completions.create(
+                    model=model,
+                    prompt=encoded_conversation,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=False
+                )
+                
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.info(f"🔧 LOCAL HARMONY: Completion response type = {type(response)}")
+                    
+                # Handle list response from llama.cpp - take the first completion
+                if isinstance(response, list) and len(response) > 0:
+                    response = response[0]  # Use first completion
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.info(f"🔧 LOCAL HARMONY: Using first completion from list")
+                
+                # Convert completion response to chat completion format
+                if response and hasattr(response, 'choices') and response.choices and len(response.choices) > 0:
+                    content = response.choices[0].text or ""
+                    
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.info(f"🔧 LOCAL HARMONY: Completion content length = {len(content)}")
+                        if len(content) > 100:
+                            logger.info(f"🔧 LOCAL HARMONY: Content preview: {content[:200]}...")
+                    
+                    # According to unsloth documentation, the model should return clean responses
+                    # If we're getting harmony channels, the model setup may need adjustment
+                    import json
+                    import re
+                    
+                    raw_content = content.strip()
+                    
+                    # Proper harmony channel processing with correct priority order
+                    if '<|channel|>' in raw_content or '<|message|>' in raw_content:
+                        if Config.DEBUG_HARMONY_ENCODING:
+                            logger.info(f"⚠️ LOCAL HARMONY: Model returned harmony channels - using priority extraction")
+                        
+                        # Priority order: final -> assistant -> analysis -> commentary -> raw
+                        channel_patterns = [
+                            (r'<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'final'),
+                            (r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'assistant_final'),
+                            (r'<\|channel\|>assistant<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'assistant'),
+                            (r'<\|channel\|>analysis<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'analysis'),
+                            (r'<\|channel\|>commentary<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'commentary'),
+                            (r'<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'message')  # fallback
+                        ]
+                        
+                        extracted_content = None
+                        channel_type = None
+                        
+                        for pattern, ch_type in channel_patterns:
+                            matches = re.findall(pattern, raw_content, re.DOTALL)
+                            if matches:
+                                # For final/assistant channels, take first match. For others, take longest
+                                if ch_type in ['final', 'assistant_final', 'assistant']:
+                                    extracted_content = matches[0].strip()
+                                    channel_type = ch_type
+                                    break
+                                else:
+                                    # For analysis/commentary, take longest match
+                                    extracted_content = max(matches, key=len).strip()
+                                    channel_type = ch_type
+                                    break
+                        
+                        if extracted_content:
+                            raw_content = extracted_content
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.info(f"✅ LOCAL HARMONY: Extracted {len(raw_content)} chars from {channel_type} channel")
+                        elif Config.DEBUG_HARMONY_ENCODING:
+                            logger.warning(f"⚠️ LOCAL HARMONY: No content found in any recognized channels")
+                    
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.info(f"🔧 LOCAL HARMONY: Final content length = {len(raw_content)}")
+                        logger.info(f"🔧 LOCAL HARMONY: Content preview: {raw_content[:200]}...")
+                    
+                    # Convert structured markdown to JSON if needed
+                    response_content = raw_content
+                    if raw_content and not raw_content.strip().startswith('{'):
+                        # The model generated structured markdown instead of JSON
+                        # Convert it to a simple JSON format the agents can parse
+                        if Config.DEBUG_HARMONY_ENCODING:
+                            logger.info(f"🔧 LOCAL HARMONY: Converting structured response to JSON format")
+                        
+                        # Convert to appropriate JSON format based on agent type (determined by caller)
+                        if Config.DEBUG_HARMONY_ENCODING:
+                            logger.info(f"🎯 LOCAL HARMONY: Using agent type '{agent_type}' to format response")
+                        
+                        if agent_type == "planner":
+                            # Planner agent - extract name, motivation, and use content as plan
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.info(f"🎯 LOCAL HARMONY: Converting to planner JSON format")
+                            
+                            # Look for architecture name patterns
+                            import re
+                            
+                            # Try multiple patterns to extract architecture name
+                            name_patterns = [
+                                r'delta_net_([^\s,\n]+)',  # delta_net_name format
+                                r'# ([^\n]+) Architecture',  # "# Name Architecture" format
+                                r'## ([^\n]+) OBJECTIVE',  # "## PRIMARY OBJECTIVE" format
+                                r'Neural Architecture Evolution[:\s]+([^\n]+)',  # "Neural Architecture Evolution: Name"
+                                r'Architecture Name[:\s]*`([^`]+)`',  # "Architecture Name: `name`" format
+                                r'`Delta[^`]*`',  # Code-quoted Delta names
+                                r'Linear[_\-]?HRM[_\-]?([^\s,\n]+)',  # Linear-HRM variations
+                            ]
+                            
+                            architecture_name = "neural_architecture_evolution_mission"  # Default
+                            
+                            # Patterns to avoid in architecture names
+                            bad_name_patterns = [
+                                'write_code_file', 'read_code_file', 'einops', 'rearrange', 'torch', 'compile',
+                                'function', 'class', 'module', 'import', 'def', 'return', 'if', 'else', 'for',
+                                'this', 'that', 'the', 'and', 'or', 'not', 'in', 'with', 'from', 'to',
+                                'primary', 'objective', 'plan', 'implementation'
+                            ]
+                            
+                            for pattern in name_patterns:
+                                name_match = re.search(pattern, raw_content, re.IGNORECASE)
+                                if name_match:
+                                    extracted_name = name_match.group(1).strip()
+                                    extracted_name_lower = extracted_name.lower()
+                                    # Check if it's a valid name (length > 3 and not a bad pattern)
+                                    if (extracted_name and len(extracted_name) > 3 and 
+                                        not any(bad in extracted_name_lower for bad in bad_name_patterns)):
+                                        architecture_name = re.sub(r'[^\w\-_]', '_', extracted_name_lower)
+                                        architecture_name = re.sub(r'_+', '_', architecture_name)
+                                        architecture_name = architecture_name.strip('_')
+                                        break
+                            
+                            # Create the JSON structure for planner
+                            planner_response = {
+                                "name": architecture_name,
+                                "motivation": "Harmony model generated architectural evolution plan from final channel",
+                                "code": f"# {architecture_name}\n# Generated from harmony model final channel\n\n{raw_content.strip()}"
+                            }
+                            
+                            response_content = json.dumps(planner_response)
+                            
+                        elif agent_type == "summarizer":
+                            # Summarizer agent - wrap as experience
+                            response_content = json.dumps({
+                                "experience": raw_content.strip()
+                            })
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.info(f"🎯 LOCAL HARMONY: Converted to summarizer experience JSON format")
+                                
+                        elif agent_type in ["analyzer", "trainer", "debugger", "code_checker", "deduplication", "motivation_checker"]:
+                            # For other agent types, create appropriate JSON structure
+                            if agent_type == "analyzer":
+                                response_content = json.dumps({
+                                    "design_evaluation": f"Harmony analysis: {raw_content[:200]}...",
+                                    "experimental_results_analysis": f"Results: {raw_content[:200]}...", 
+                                    "expectation_vs_reality_comparison": f"Comparison: {raw_content[:200]}...",
+                                    "theoretical_explanation_with_evidence": f"Theory: {raw_content[:200]}...",
+                                    "synthesis_and_insights": f"Insights: {raw_content[:200]}..."
+                                })
+                            elif agent_type in ["trainer", "code_checker"]:
+                                response_content = json.dumps({
+                                    "success": True,
+                                    "error": None
+                                })
+                            elif agent_type == "debugger":
+                                response_content = json.dumps({
+                                    "changes_made": f"Harmony debugging response: {raw_content[:200]}..."
+                                })
+                            elif agent_type == "deduplication":
+                                response_content = json.dumps({
+                                    "name": "harmony_deduplication_result",
+                                    "motivation": f"Deduplication analysis: {raw_content[:200]}...",
+                                    "code": raw_content.strip()
+                                })
+                            elif agent_type == "motivation_checker":
+                                response_content = json.dumps({
+                                    "is_repeated": False,
+                                    "repeated_index": [],
+                                    "judgement_reason": f"Harmony analysis: {raw_content[:200]}..."
+                                })
+                            
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.info(f"🎯 LOCAL HARMONY: Converted to {agent_type} JSON format")
+                        else:
+                            # Generic agent or no agent type - wrap as generic response
+                            response_content = json.dumps({
+                                "response": raw_content.strip()
+                            })
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.info(f"🎯 LOCAL HARMONY: No specific agent type, converted to generic JSON format")
+                    
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.info(f"🔧 LOCAL HARMONY: Final response content length = {len(response_content)}")
+                        logger.info(f"🔧 LOCAL HARMONY: Content starts with: {response_content[:100]}...")
+                    
+                    # Create proper ChatCompletion response using openai types
+                    from openai.types.chat import ChatCompletion, ChatCompletionMessage
+                    from openai.types.chat.chat_completion import Choice
+                    
+                    message = ChatCompletionMessage(
+                        role="assistant",
+                        content=response_content
+                    )
+                    
+                    choice = Choice(
+                        index=0,
+                        message=message,
+                        finish_reason="stop"
+                    )
+                    
+                    chat_response = ChatCompletion(
+                        id=f"chatcmpl-local-{response.id}",
+                        choices=[choice],
+                        created=response.created,
+                        model=response.model,
+                        object="chat.completion"
+                    )
+                    
+                    # Add messages attribute for agents compatibility
+                    chat_response.messages = [message]
+                    
+                    return chat_response
+                    
+            except Exception as completion_error:
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.info(f"🔧 LOCAL HARMONY: Completion API failed, trying chat API: {completion_error}")
+                
+                # Fallback to chat API with simpler message format
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": encoded_conversation}],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=False
+                )
+            
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.info(f"📨 LOCAL HARMONY: Got response from local model")
+                logger.info(f"🔧 LOCAL HARMONY: Final response type = {type(response)}")
+                
+            # Handle list response from llama.cpp - take the first completion  
+            if isinstance(response, list) and len(response) > 0:
+                response = response[0]  # Use first completion
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.info(f"🔧 LOCAL HARMONY: Using first completion from chat API list")
+                
+            # Extract the response content
+            if response and hasattr(response, 'choices') and response.choices and len(response.choices) > 0:
+                content = response.choices[0].message.content or ""
+                
+                # Simple JSON extraction for local harmony responses
+                import json
+                import re
+                
+                # Look for JSON patterns in the response
+                json_matches = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content)
+                
+                if json_matches:
+                    for json_str in json_matches:
+                        try:
+                            parsed_json = json.loads(json_str)
+                            # If we found valid JSON with expected keys, use it
+                            if isinstance(parsed_json, dict) and ('name' in parsed_json or 'experience' in parsed_json):
+                                if Config.DEBUG_HARMONY_ENCODING:
+                                    logger.info(f"🎯 LOCAL HARMONY: Found valid JSON response")
+                                
+                                # Create a proper ChatCompletion response
+                                response.choices[0].message.content = json_str
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                            
+                # Ensure messages attribute exists for agents compatibility
+                if not hasattr(response, 'messages'):
+                    response.messages = [response.choices[0].message] if response.choices else []
+                    
+                return response
+            else:
+                raise Exception("No valid response from local harmony model")
+                
+        except Exception as e:
+            logger.error(f"❌ LOCAL HARMONY: Error in simplified harmony encoding: {e}")
+            raise
+    
     async def chat_completions_create_harmony(self, **kwargs):
         """Create completion using unsloth harmony encoding."""
         try:
             from unsloth_zoo import encode_conversations_with_harmony
             from pipeline.config import Config
             from pipeline.utils.harmony_json_sanitizer import sanitize_harmony_parameters
+            
+            # Check if this is a local model that should use simplified approach
+            base_url = kwargs.get('base_url', getattr(Config, 'OPENAI_BASE_URL', ''))
+            if self._is_local_harmony_host(base_url):
+                # Pass agent type to local harmony method - need to determine it first
+                # Get agent type from content analysis (this happens in main method)
+                messages = kwargs.get('messages', [])
+                all_content = ' '.join([msg.get('content', '') for msg in messages if msg.get('content')])
+                
+                # Task detection keywords (copied from main method)
+                planner_keywords = ['architecture designer', 'write_code_file', 'read_code_file', 'deltanet', 'neural network architectures', 'name:', 'motivation:', 'implementation first']
+                summarizer_keywords = ['systematic evaluator', 'experience synthesis', 'performance analysis context', 'experimental_performance_context', 'experience']
+                analyzer_keywords = ['architecture performance analyzer', 'comprehensive analysis of experimental results', 'design evaluation', 'expectation vs reality', 'theoretical explanation with evidence', 'synthesis and insights']
+                trainer_keywords = ['training runner', 'training execution expert', 'run_training_script', 'script execution success', 'training completed successfully']
+                debugger_keywords = ['training code debugger', 'debugging expert', 'training failures', 'minimal code fixes', 'resolve technical correctness', 'preservation constraints']
+                code_checker_keywords = ['code checker and fixer', 'code validator', 'technical correctness', 'validation workflow', 'batch size independence', 'mask correctness']
+                deduplication_keywords = ['innovation diversifier', 'breakthrough researcher', 'genuinely novel', 'revolutionary alternatives', 'orthogonal innovation design', 'mandatory tool usage']
+                motivation_checker_keywords = ['motivation_checker', 'duplicate motivations', 'semantic extraction', 'comparative analysis', 'duplication determination', 'research analysis expert']
+                
+                # Determine agent type from message content
+                detected_agent_type = None
+                if any(keyword in all_content for keyword in planner_keywords):
+                    detected_agent_type = "planner"
+                elif any(keyword in all_content for keyword in summarizer_keywords):
+                    detected_agent_type = "summarizer"
+                elif any(keyword in all_content for keyword in analyzer_keywords):
+                    detected_agent_type = "analyzer"
+                elif any(keyword in all_content for keyword in trainer_keywords):
+                    detected_agent_type = "trainer"
+                elif any(keyword in all_content for keyword in debugger_keywords):
+                    detected_agent_type = "debugger"
+                elif any(keyword in all_content for keyword in code_checker_keywords):
+                    detected_agent_type = "code_checker"
+                elif any(keyword in all_content for keyword in deduplication_keywords):
+                    detected_agent_type = "deduplication"
+                elif any(keyword in all_content for keyword in motivation_checker_keywords):
+                    detected_agent_type = "motivation_checker"
+                
+                # Pass agent type to local harmony method
+                kwargs['agent_type'] = detected_agent_type
+                return await self._chat_completions_create_harmony_local(**kwargs)
             
             messages = kwargs.get('messages', [])
             model = kwargs.get('model', '')
@@ -1247,6 +1679,27 @@ REQUIRED OUTPUT FORMAT:
             
             has_tool_usage = any(re.search(pattern, response_text, re.IGNORECASE) for pattern in tool_usage_patterns)
             
+            # Check for JSON content outside harmony channels (common failure mode)
+            if is_json_task and not has_tool_usage and '<|channel|>' not in cleaned:
+                # This might be a simple JSON response without harmony formatting
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned, re.DOTALL)
+                if json_match:
+                    try:
+                        candidate_json = json_match.group(0).strip()
+                        parsed = json.loads(candidate_json)
+                        
+                        # Check if it matches the expected agent schema
+                        if agent_type in ["planner", "deduplication"] and "name" in parsed and "motivation" in parsed:
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.debug(f"🎯 DIRECT JSON: Found valid {agent_type} JSON outside channels: {candidate_json[:100]}...")
+                            return candidate_json
+                        elif agent_type not in ["planner", "deduplication"]:
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.debug(f"🎯 DIRECT JSON: Found JSON for {agent_type} outside channels: {candidate_json[:100]}...")
+                            return candidate_json
+                    except json.JSONDecodeError:
+                        pass
+            
             # Check for harmony channel tokens
             if '<|channel|>' in cleaned:
                 from pipeline.config import Config
@@ -1254,7 +1707,9 @@ REQUIRED OUTPUT FORMAT:
                 # Extract final channel content first (highest priority)
                 final_patterns = [
                     r'<\|channel\|>final<\|message\|>(.*?)(?=<\|channel\||<\|start\||<\|end\||$)',
-                    r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*?)(?=<\|channel\||<\|start\||<\|end\||$)'
+                    r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*?)(?=<\|channel\||<\|start\||<\|end\||$)',
+                    r'<\|channel\|>final<\|message\|>(.*)',  # Final channel to end of string
+                    r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*)'  # Assistant final channel to end
                 ]
                 
                 for pattern in final_patterns:
@@ -1270,33 +1725,41 @@ REQUIRED OUTPUT FORMAT:
                             # Remove any trailing harmony tokens
                             final_content = re.sub(r'<\|.*?$', '', final_content).strip()
                             
-                            # Extract JSON object from final content
-                            json_match = re.search(r'\{.*?\}', final_content, re.DOTALL)
-                            if json_match:
-                                try:
-                                    candidate_json = json_match.group(0)
-                                    parsed = json.loads(candidate_json)
-                                    
-                                    # Validate it's not a tool call JSON for agent tasks
-                                    if agent_type in ["planner", "deduplication"]:
-                                        name_value = parsed.get("name", "")
-                                        is_tool_call = name_value in ["read_code_file", "write_code_file", "run_training_script"]
+                            # Extract JSON object from final content - try multiple patterns
+                            json_patterns = [
+                                r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON objects
+                                r'\{.*?\}(?=\s*(?:<\||\Z))',        # JSON followed by harmony token or end
+                                r'\{.*?\}',                          # Simple JSON match
+                            ]
+                            
+                            for pattern in json_patterns:
+                                json_matches = re.findall(pattern, final_content, re.DOTALL)
+                                for json_match in json_matches:
+                                    try:
+                                        candidate_json = json_match.strip()
+                                        parsed = json.loads(candidate_json)
                                         
-                                        if not is_tool_call and "name" in parsed and "motivation" in parsed:
+                                        # Validate it's not a tool call JSON for agent tasks
+                                        if agent_type in ["planner", "deduplication"]:
+                                            name_value = parsed.get("name", "")
+                                            is_tool_call = name_value in ["read_code_file", "write_code_file", "run_training_script"]
+                                            
+                                            if not is_tool_call and "name" in parsed and "motivation" in parsed:
+                                                if Config.DEBUG_HARMONY_ENCODING:
+                                                    logger.debug(f"✅ FINAL CHANNEL: Valid {agent_type} JSON found: {candidate_json[:100]}...")
+                                                return candidate_json
+                                            elif Config.DEBUG_HARMONY_ENCODING:
+                                                logger.debug(f"🔧 FINAL CHANNEL: Filtered tool call from final channel: {name_value}")
+                                        else:
+                                            # For other agent types, return valid JSON from final channel
                                             if Config.DEBUG_HARMONY_ENCODING:
-                                                logger.debug(f"✅ FINAL CHANNEL: Valid {agent_type} JSON found: {candidate_json[:100]}...")
+                                                logger.debug(f"✅ FINAL CHANNEL: Valid JSON found for {agent_type}: {candidate_json[:100]}...")
                                             return candidate_json
-                                        elif Config.DEBUG_HARMONY_ENCODING:
-                                            logger.debug(f"🔧 FINAL CHANNEL: Filtered tool call from final channel: {name_value}")
-                                    else:
-                                        # For other agent types, return valid JSON from final channel
+                                            
+                                    except json.JSONDecodeError as e:
                                         if Config.DEBUG_HARMONY_ENCODING:
-                                            logger.debug(f"✅ FINAL CHANNEL: Valid JSON found for {agent_type}: {candidate_json[:100]}...")
-                                        return candidate_json
-                                        
-                                except json.JSONDecodeError as e:
-                                    if Config.DEBUG_HARMONY_ENCODING:
-                                        logger.debug(f"❌ FINAL CHANNEL: Invalid JSON in final channel: {e}")
+                                            logger.debug(f"❌ FINAL CHANNEL: Invalid JSON candidate: {e} - {json_match[:100]}...")
+                                        continue
                             
                             # If no valid JSON in final channel, try extracting text response
                             if final_content and not final_content.startswith('{'):
@@ -1311,9 +1774,28 @@ REQUIRED OUTPUT FORMAT:
                 if is_json_task:
                     from pipeline.config import Config
                     
-                    # Find all JSON objects in the response (objects only, not arrays)
-                    all_json_matches = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned, re.DOTALL)
-                    all_json_matches.extend(re.findall(r'\{.*?\}', cleaned, re.DOTALL))
+                    # Find all JSON objects in the response with enhanced patterns
+                    json_patterns = [
+                        r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON objects
+                        r'\{.*?\}(?=\s*(?:<\||\n|$))',       # JSON followed by harmony token, newline, or end
+                        r'\{[^<>]*\}',                       # JSON without harmony tokens inside
+                        r'\{.*?\}'                           # Fallback simple JSON match
+                    ]
+                    
+                    all_json_matches = []
+                    for pattern in json_patterns:
+                        matches = re.findall(pattern, cleaned, re.DOTALL)
+                        all_json_matches.extend(matches)
+                    
+                    # Remove duplicates while preserving order
+                    seen = set()
+                    unique_matches = []
+                    for match in all_json_matches:
+                        clean_match = match.strip()
+                        if clean_match not in seen:
+                            seen.add(clean_match)
+                            unique_matches.append(clean_match)
+                    all_json_matches = unique_matches
                     
                     # Also find arrays (which might be tool parameters from harmony)
                     array_matches = re.findall(r'\[[^\[\]]*\]', cleaned)
@@ -1567,26 +2049,78 @@ REQUIRED OUTPUT FORMAT:
             return response_text
     
     def _normalize_tool_args(self, args_str: str) -> str:
-        """Normalize tool arguments, converting empty arrays to empty objects."""
+        """Normalize tool arguments with comprehensive validation and JSON fixing."""
+        import json
+        from pipeline.config import Config
+        
         if not args_str:
             return '{}'
         
         args_str = args_str.strip()
         
+        if Config.DEBUG_HARMONY_ENCODING:
+            logger.debug(f"🔧 NORMALIZING ARGS: Raw input: '{args_str}'")
+        
         # If it's an empty array, convert to empty object
         if args_str == '[]':
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"🔧 NORMALIZING ARGS: Converting empty array to empty object")
             return '{}'
         
-        # If it starts with [ (array), convert to empty object (tools expect objects)
+        # If it starts with [ (array), try to extract meaningful data or convert to empty object
         if args_str.startswith('[') and args_str.endswith(']'):
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"🔧 NORMALIZING ARGS: Converting array to empty object")
             return '{}'
         
-        # If it's already a valid object, return as-is
+        # If it's already a valid object, validate it
         if args_str.startswith('{') and args_str.endswith('}'):
-            return args_str
+            try:
+                # Validate JSON
+                json.loads(args_str)
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.debug(f"🔧 NORMALIZING ARGS: Valid JSON object")
+                return args_str
+            except json.JSONDecodeError as e:
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.debug(f"🔧 NORMALIZING ARGS: Invalid JSON, fixing: {e}")
+                # Try to fix common JSON issues
+                fixed = args_str
+                # Fix common JSON issues like trailing commas, unquoted keys, etc.
+                import re
+                # Remove trailing commas
+                fixed = re.sub(r',\s*}', '}', fixed)
+                fixed = re.sub(r',\s*]', ']', fixed)
+                try:
+                    json.loads(fixed)
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"🔧 NORMALIZING ARGS: Fixed JSON: '{fixed}'")
+                    return fixed
+                except json.JSONDecodeError:
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"🔧 NORMALIZING ARGS: Could not fix JSON, using empty object")
+                    return '{}'
+        
+        # For non-JSON strings, try to create a valid JSON object
+        if args_str and not args_str.startswith(('{', '[')):
+            # If it looks like a simple string value, wrap it
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"🔧 NORMALIZING ARGS: Creating JSON from string")
+            try:
+                # Try to parse as JSON first
+                json.loads(args_str)
+                return args_str
+            except json.JSONDecodeError:
+                # Wrap as a string value (common for content arguments)
+                wrapped = json.dumps({"content": args_str})
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.debug(f"🔧 NORMALIZING ARGS: Wrapped as content: '{wrapped}'")
+                return wrapped
         
         # Default fallback
-        return args_str if args_str else '{}'
+        if Config.DEBUG_HARMONY_ENCODING:
+            logger.debug(f"🔧 NORMALIZING ARGS: Using default empty object fallback")
+        return '{}'
     
     def _create_chat_completion_response(self, full_response: str, final_content: str, model: str, original_response) -> ChatCompletion:
         """Create a ChatCompletion response from cleaned content."""
@@ -1707,25 +2241,45 @@ REQUIRED OUTPUT FORMAT:
                         logger.debug(f"   Skipping - no function name determined")
                     continue
                     
-                # Create tool call
+                # Validate and create tool call
                 if Config.DEBUG_HARMONY_ENCODING:
                     logger.debug(f"🔧 CREATING TOOL CALL:")
                     logger.debug(f"   Function name: '{current_function_name}'")
                     logger.debug(f"   Function args: '{function_args}'")
                     logger.debug(f"   Args type: {type(function_args)}")
+                
+                # Ensure arguments is a valid JSON string
+                try:
+                    if isinstance(function_args, str):
+                        # Validate it's parseable JSON
+                        import json
+                        json.loads(function_args)
+                        args_str = function_args
+                    else:
+                        # Convert to JSON string
+                        args_str = json.dumps(function_args)
+                    
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"🔧 VALIDATED ARGS: '{args_str}'")
+                        
+                except (json.JSONDecodeError, TypeError) as e:
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"❌ INVALID ARGS: {e}, using empty object")
+                    args_str = '{}'
                     
                 tool_call = ChatCompletionMessageToolCall(
                     id=f"call_{current_function_name}_{len(all_tool_calls)}",
                     function=Function(
                         name=current_function_name,
-                        arguments=function_args
+                        arguments=args_str
                     ),
                     type="function"
                 )
                 all_tool_calls.append(tool_call)
                 
                 if Config.DEBUG_HARMONY_ENCODING:
-                    logger.debug(f"✅ TOOL EXTRACTION: Found {current_function_name} call with args: {function_args[:100] if len(str(function_args)) > 100 else function_args}...")
+                    logger.debug(f"✅ CREATED TOOL CALL: id={tool_call.id}, name={tool_call.function.name}")
+                    logger.debug(f"   Final arguments: {tool_call.function.arguments}")
                     
             # Remove all matches of this pattern from content for next iteration
             if matches:
@@ -1770,11 +2324,23 @@ REQUIRED OUTPUT FORMAT:
         if Config.DEBUG_HARMONY_ENCODING:
             logger.debug(f"🔧 CHATCOMPLETION DEBUG: Creating ChatCompletion object")
             logger.debug(f"   Choice type: {type(choice)}")
-            logger.debug(f"   Choice attributes: {dir(choice)}")
             logger.debug(f"   Message type: {type(message)}")
-            logger.debug(f"   Message attributes: {dir(message)}")
             logger.debug(f"   Message content: {message.content[:100] if message.content else None}...")
             logger.debug(f"   Message tool_calls: {len(message.tool_calls) if message.tool_calls else 0}")
+            
+            # Debug individual tool calls
+            if message.tool_calls:
+                for i, tc in enumerate(message.tool_calls):
+                    logger.debug(f"     Tool call {i}: id={tc.id}, name={tc.function.name}")
+                    logger.debug(f"       Arguments: {tc.function.arguments}")
+                    logger.debug(f"       Type: {tc.type}")
+                    # Validate the arguments are parseable
+                    try:
+                        import json
+                        parsed_args = json.loads(tc.function.arguments)
+                        logger.debug(f"       ✅ Arguments parse successfully: {type(parsed_args)}")
+                    except Exception as e:
+                        logger.debug(f"       ❌ Arguments parse failed: {e}")
         
         chat_completion = ChatCompletion(
             id=original_response.id if hasattr(original_response, 'id') else "chatcmpl-harmony",
@@ -1789,7 +2355,6 @@ REQUIRED OUTPUT FORMAT:
         if Config.DEBUG_HARMONY_ENCODING:
             logger.debug(f"🔧 CHATCOMPLETION DEBUG: Created ChatCompletion")
             logger.debug(f"   ChatCompletion type: {type(chat_completion)}")
-            logger.debug(f"   ChatCompletion attributes: {dir(chat_completion)}")
             logger.debug(f"   Choices length: {len(chat_completion.choices)}")
             logger.debug(f"   First choice type: {type(chat_completion.choices[0])}")
             logger.debug(f"   First choice message type: {type(chat_completion.choices[0].message)}")
@@ -1801,8 +2366,12 @@ REQUIRED OUTPUT FORMAT:
                 logger.debug(f"   Message content exists: {test_message.content is not None}")
                 logger.debug(f"   Message tool_calls exists: {test_message.tool_calls is not None}")
                 if test_message.tool_calls:
+                    logger.debug(f"🎯 CRITICAL: TOOL CALLS CONFIRMED in final ChatCompletion object!")
+                    logger.debug(f"   Final tool calls count: {len(test_message.tool_calls)}")
                     for i, tc in enumerate(test_message.tool_calls):
-                        logger.debug(f"   Tool call {i}: {tc.function.name}({tc.function.arguments[:100]}...)")
+                        logger.debug(f"     Final tool {i}: {tc.function.name} with args {tc.function.arguments[:50]}...")
+                else:
+                    logger.debug(f"❌ CRITICAL: NO TOOL CALLS in final ChatCompletion object!")
             except Exception as e:
                 logger.error(f"❌ CHATCOMPLETION DEBUG: Error accessing choices[0].message: {e}")
         
@@ -1814,7 +2383,13 @@ REQUIRED OUTPUT FORMAT:
             chat_completion.messages = [choice.message for choice in chat_completion.choices]
             if Config.DEBUG_HARMONY_ENCODING:
                 logger.debug(f"🔧 AGENTS COMPATIBILITY: Added messages attribute with {len(chat_completion.messages)} messages")
-                logger.debug(f"   Message 0 has tool_calls: {chat_completion.messages[0].tool_calls is not None}")
+                if chat_completion.messages:
+                    logger.debug(f"   Message 0 has tool_calls: {chat_completion.messages[0].tool_calls is not None}")
+        else:
+            # Ensure messages attribute always exists, even if empty
+            chat_completion.messages = []
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.warning(f"🔧 AGENTS COMPATIBILITY: No choices found, created empty messages list")
         
         return chat_completion
 
