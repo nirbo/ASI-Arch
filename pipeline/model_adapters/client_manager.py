@@ -32,8 +32,7 @@ class ModelClientManager:
         api_key: str,
         base_url: str,
         default_model: Optional[str] = None,
-        force_harmony: Optional[bool] = None,
-        auto_start_services: bool = True
+        force_harmony: Optional[bool] = None
     ):
         """
         Initialize the model client manager.
@@ -43,13 +42,11 @@ class ModelClientManager:
             base_url: Base URL for the API
             default_model: Default model to use
             force_harmony: Force Harmony (True) or Standard (False) adapter
-            auto_start_services: Whether to automatically start harmony services when needed
         """
         self.api_key = api_key
         self.base_url = base_url
         self.default_model = default_model
         self.force_harmony = force_harmony
-        self.auto_start_services = auto_start_services
         
         # Cache for created adapters to avoid recreating them
         self._adapter_cache: Dict[str, ModelAdapter] = {}
@@ -133,8 +130,7 @@ class ModelClientManager:
                 api_key=self.api_key,
                 base_url=self.base_url,
                 model=model_to_use,
-                force_harmony=self.force_harmony,
-                auto_start_service=self.auto_start_services
+                force_harmony=self.force_harmony
             )
             
             # Cache the adapter and track service management

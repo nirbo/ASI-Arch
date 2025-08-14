@@ -88,13 +88,10 @@ class ModelAdapterFactory:
         api_key: str,
         base_url: str,
         model: str,
-        force_harmony: Optional[bool] = None,
-        auto_start_service: bool = True
+        force_harmony: Optional[bool] = None
     ) -> Tuple[ModelAdapter, bool]:
         """
-        Create the appropriate model adapter with automatic service management.
-        
-        This async version can automatically start harmony services when needed.
+        Create the appropriate model adapter (simplified - no service management).
         
         Args:
             api_key: API key for the service
@@ -102,7 +99,6 @@ class ModelAdapterFactory:
             model: Model name to use
             force_harmony: Optional flag to force Harmony adapter (True) or Standard (False)
                           If None, auto-detect based on model name
-            auto_start_service: Whether to automatically start harmony service if needed
             
         Returns:
             Tuple of (ModelAdapter instance, service_started: bool)
@@ -111,30 +107,16 @@ class ModelAdapterFactory:
             ValueError: If model configuration is invalid
             ImportError: If required dependencies are missing
         """
-        service_started = False
+        service_started = False  # No services managed anymore
         
         try:
-            # Determine if we need harmony
+            # Determine if we need harmony (simplified)
             need_harmony = force_harmony is True or (
                 force_harmony is None and cls._is_harmony_model(model)
             )
             
-            if need_harmony and auto_start_service:
-                # Try to ensure harmony service is running
-                service_manager = get_service_manager()
-                success, result_url = await service_manager.ensure_service_running(model)
-                
-                if success:
-                    logger.info(f"Harmony service ready for model {model} at {result_url}")
-                    # Use the service URL instead of the provided base_url
-                    effective_base_url = result_url
-                    service_started = True
-                else:
-                    logger.warning(f"Failed to start harmony service for {model}: {result_url}")
-                    logger.info("Proceeding with provided base_url")
-                    effective_base_url = base_url
-            else:
-                effective_base_url = base_url
+            # Use provided base_url directly (no service management)
+            effective_base_url = base_url
             
             # Use Standard adapter for all models (harmony encoding is now handled in agents_config.py)
             if force_harmony is True:

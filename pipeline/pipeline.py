@@ -39,54 +39,10 @@ client_manager = ModelClientManager(
     api_key=Config.OPENAI_API_KEY,
     base_url=Config.OPENAI_BASE_URL,
     default_model=Config.OPENAI_MODEL,
-    force_harmony=Config.FORCE_HARMONY_MODE,
-    auto_start_services=Config.AUTO_START_HARMONY_SERVICES
+    force_harmony=Config.FORCE_HARMONY_MODE
 )
 
-# Add any additional harmony patterns from config
-if Config.HARMONY_MODEL_PATTERNS:
-    for pattern in Config.HARMONY_MODEL_PATTERNS:
-        ModelAdapterFactory.add_harmony_pattern(pattern)
-
-# Configure harmony service defaults from config
-from pipeline.model_adapters import HarmonyServiceConfig
-if hasattr(Config, 'HARMONY_SERVICE_HOST') and Config.OPENAI_MODEL:
-    # Register default service configuration for the main model if it's a harmony model
-    if ModelAdapterFactory._is_harmony_model(Config.OPENAI_MODEL):
-        # Create custom command if specified in config
-        command = None
-        if Config.HARMONY_SERVICE_COMMAND:
-            command = [
-                arg.format(
-                    model=Config.OPENAI_MODEL,
-                    port=Config.HARMONY_SERVICE_PORT_START,
-                    host=Config.HARMONY_SERVICE_HOST
-                ) 
-                for arg in Config.HARMONY_SERVICE_COMMAND
-            ]
-        
-        # Create service configuration
-        service_config = HarmonyServiceConfig(
-            model=Config.OPENAI_MODEL,
-            host=Config.HARMONY_SERVICE_HOST,
-            port=Config.HARMONY_SERVICE_PORT_START,
-            command=command or [
-                "python", "-m", "harmony_service",
-                "--model", Config.OPENAI_MODEL,
-                "--host", Config.HARMONY_SERVICE_HOST,
-                "--port", str(Config.HARMONY_SERVICE_PORT_START),
-                "--timeout", "300"
-            ],
-            working_dir=Config.HARMONY_SERVICE_WORKING_DIR or None,
-            environment=Config.HARMONY_SERVICE_ENVIRONMENT,
-            startup_timeout=Config.HARMONY_SERVICE_STARTUP_TIMEOUT,
-            health_check_timeout=Config.HARMONY_SERVICE_HEALTH_TIMEOUT,
-            shutdown_timeout=Config.HARMONY_SERVICE_SHUTDOWN_TIMEOUT
-        )
-        
-        # Register the configuration
-        ModelAdapterFactory.register_service_config(service_config)
-        log_info(f"Registered harmony service configuration for model: {Config.OPENAI_MODEL}")
+# Harmony detection is simplified - only gpt-oss models use harmony (via unsloth_zoo directly)
 
 # For backward compatibility with agents library, create a wrapper that looks like AsyncOpenAI
 

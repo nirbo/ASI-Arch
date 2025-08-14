@@ -31,23 +31,15 @@ class Config:
     DATABASE: str = "http://localhost:8001"
     
     # Local Model
-    OPENAI_API_KEY: str = "dummy"
-    OPENAI_BASE_URL: str = "http://localhost:8080/v1"  # llama.cpp server
-    OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    # OPENAI_API_KEY: str = "dummy"
+    # OPENAI_BASE_URL: str = "http://localhost:8080/v1"  # llama.cpp server
+    # OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
     # Openrouter
     # API key will be read from environment variable OPENAI_API_KEY, with fallback to hardcoded value
-    # OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy-key-set-OPENAI_API_KEY-environment-variable")
-    # OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
-    # OPENAI_MODEL: str = "openai/gpt-oss-20b:free"  # Switched from gpt-oss-20b for better structured output compatibility
-    
-    # Model Adapter Configuration
-    # Set to True to force Harmony adapter, False for Standard adapter, None for auto-detection
-    FORCE_HARMONY_MODE: bool | None = True  # Force harmony for gpt-oss models - they work better with harmony encoding
-    
-    # Harmony Model Configuration
-    # Additional patterns to detect Harmony models (beyond default gpt-oss patterns)
-    HARMONY_MODEL_PATTERNS: list[str] = []  # e.g., ["custom-harmony-model", "local-gpt-oss"]
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy-key-set-OPENAI_API_KEY-environment-variable")
+    OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
+    OPENAI_MODEL: str = "openai/gpt-oss-20b:free"  # Switched from gpt-oss-20b for better structured output compatibility
     
     # Model Prefixes Configuration
     # List of model prefixes that should be handled by any provider
@@ -58,33 +50,16 @@ class Config:
         "cohere", "meta", "llama", "deepseek", "perplexity", "cognitivecomputations"
     ]
     
-    # Harmony Service Configuration
-    # Whether to automatically start harmony services when harmony models are detected
-    # Set to False since we use openai-harmony library directly, not a separate service
-    AUTO_START_HARMONY_SERVICES: bool = False
+    # Model Adapter Configuration
+    # Set to True to force Harmony adapter for gpt-oss models
+    FORCE_HARMONY_MODE: bool | None = True  # Force harmony for gpt-oss models - they work better with harmony encoding
     
-    # Default harmony service configuration
-    HARMONY_SERVICE_HOST: str = "localhost"
-    HARMONY_SERVICE_PORT_START: int = 8080  # Starting port for harmony services
-    HARMONY_SERVICE_STARTUP_TIMEOUT: float = 120.0  # Seconds to wait for service startup
-    HARMONY_SERVICE_HEALTH_TIMEOUT: float = 10.0  # Seconds for health check timeout
-    HARMONY_SERVICE_SHUTDOWN_TIMEOUT: float = 30.0  # Seconds to wait for graceful shutdown
-    
-    # Harmony Model Generation Configuration
+    # Harmony Configuration (for gpt-oss models)
     # Max tokens for harmony model completions - needs to be high for academic reasoning chains
     HARMONY_MAX_TOKENS: int = 32768  # Max tokens for experiment responses 
     
     # Harmony reasoning effort level - controls model's reasoning depth
     HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
-    
-    # Custom harmony service command (leave empty for default openai-harmony service)
-    HARMONY_SERVICE_COMMAND: list[str] = []
-    
-    # Environment variables for harmony service processes
-    HARMONY_SERVICE_ENVIRONMENT: dict[str, str] = {}
-    
-    # Working directory for harmony service processes (leave empty for current directory)
-    HARMONY_SERVICE_WORKING_DIR: str = ""
     
     # Embedding Model Configuration
     EMBEDDING_MODEL: str = "doubao-embedding-large-text-240915"  # Embedding model for vector search
@@ -109,33 +84,8 @@ class Config:
 
     RETRY_INTERVAL: int = 5
     
-    # Harmony Model Generation Configuration
-    # Max tokens for harmony model completions - needs to be high for academic reasoning chains
-    HARMONY_MAX_TOKENS: int = 43000  # Max tokens for experiment responses 
-    
-    # Harmony reasoning effort level - controls model's reasoning depth
-    HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
-    
-    # Local Harmony Hosts Configuration
-    # List of hostnames/IPs that should use simplified unsloth_zoo harmony encoding
-    LOCAL_HARMONY_HOSTS: list[str] = [
-        "localhost",
-        "127.0.0.1", 
-        "0.0.0.0",
-        "::1"  # IPv6 localhost
-    ]
 
     # Debug Configuration
     DEBUG_AGENT_TURNS: bool = True  # Enable/disable detailed agent turn debugging
     DEBUG_HARMONY_ENCODING: bool = True  # Enable/disable harmony encoding debugging
     DEBUG_RESPONSE_CONTENT: bool = True  # Enable/disable response content debugging
-    DISABLE_HARMONY_FOR_DEBUG: bool = False  # Temporarily disable harmony encoding to debug
-    
-    # Harmony Detection Strategy
-    HARMONY_DETECTION_STRATEGY: str = "auto"  # Options: "always", "never", "auto", "adaptive"
-    # - "always": Always use harmony encoding for gpt-oss models (REQUIRED for OpenRouter gpt-oss)
-    # - "never": Never use harmony encoding (standard OpenAI format)  
-    # - "auto": Try to detect based on URL (localhost = standard, others = harmony for gpt-oss)
-    # - "adaptive": Try harmony first, fall back to standard if it fails
-    # NOTE: OpenRouter's gpt-oss models REQUIRE harmony format to function properly
-    # FIXED: localhost llama.cpp servers work better with standard format, matching Unsloth notebook behavior
