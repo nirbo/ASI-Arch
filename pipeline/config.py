@@ -108,6 +108,13 @@ class Config:
     MAX_TURNS_DEBUGGER: int = 5         # Error analysis and code fixing
 
     RETRY_INTERVAL: int = 5
+    
+    # Harmony Model Generation Configuration
+    # Max tokens for harmony model completions - needs to be high for academic reasoning chains
+    HARMONY_MAX_TOKENS: int = 32768  # Max tokens for experiment responses 
+    
+    # Harmony reasoning effort level - controls model's reasoning depth
+    HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
 
     # Debug Configuration
     DEBUG_AGENT_TURNS: bool = True  # Enable/disable detailed agent turn debugging
