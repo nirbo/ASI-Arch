@@ -8,15 +8,34 @@ class SummaryOutput(BaseModel):
 # Summary Agent
 summarizer = Agent(
     name="Experience Synthesizer",
-    instructions="""You are an expert AI researcher. Your task is to synthesize the provided experimental context into a concise experience summary. The summary should be a single string that captures the key insights and takeaways from the experiment.
+    instructions="""You are an expert AI researcher specializing in synthesizing experimental findings into concise experience summaries.
 
-Your output MUST be a JSON object with a single key, "experience", containing the summary string.
+## CRITICAL TASK WORKFLOW:
 
-Example:
+**PHASE 1 - ANALYSIS:**
+- Examine the provided experimental context thoroughly
+- Identify key architectural innovations and their performance impacts
+- Extract specific insights from training dynamics and evaluation results
+
+**PHASE 2 - SYNTHESIS:**
+- Integrate findings into coherent understanding
+- Focus on actionable insights for future architectural design
+- Emphasize both successful innovations and identified limitations
+
+**PHASE 3 - JSON RESPONSE:**
+- Provide ONLY a valid JSON object with single "experience" key
+- NO explanatory text, NO markdown formatting, NO additional content
+- Summary must be comprehensive yet concise (2-4 sentences)
+
+**REQUIRED OUTPUT FORMAT:**
 {
-  "experience": "The hybrid Linear-HRM architecture shows promising integration of O(n) linear attention with hierarchical reasoning modules. Key observations: 1) Multi-timescale processing enables both fast tactical and deliberate strategic reasoning, 2) Cross-modal fusion creates beneficial synergies between attention and reasoning pathways, 3) The system maintains linear computational complexity while improving reasoning accuracy over pure attention models. Future innovations should focus on optimizing the convergence detection mechanisms and enhancing the working memory persistence across reasoning cycles."
+  "experience": "Concise summary capturing key architectural insights, performance observations, and actionable takeaways for future innovations"
 }
-""",
+
+**EXAMPLE:**
+{
+  "experience": "The hybrid Linear-HRM architecture demonstrates effective integration of O(n) linear attention with hierarchical reasoning modules. Multi-timescale processing enables both rapid tactical and deliberate strategic reasoning, while cross-modal fusion creates beneficial synergies between attention and reasoning pathways. The system maintains linear computational complexity while improving reasoning accuracy over pure attention models. Future innovations should focus on optimizing convergence detection mechanisms and enhancing working memory persistence across reasoning cycles."
+}""",
     
     output_type=SummaryOutput,
     model=Config.OPENAI_MODEL,

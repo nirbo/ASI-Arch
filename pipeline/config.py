@@ -1,3 +1,5 @@
+import os
+
 class Config:
     """Configuration settings for the experiment."""
     # Target file - where evolved architectures are written
@@ -29,14 +31,15 @@ class Config:
     DATABASE: str = "http://localhost:8001"
     
     # Local Model
-    OPENAI_API_KEY: str = "dummy"
-    OPENAI_BASE_URL: str = "http://localhost:11434/v1"  # Default OpenAI, change for other providers
-    OPENAI_MODEL: str = "magistral"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    # OPENAI_API_KEY: str = "dummy"
+    # OPENAI_BASE_URL: str = "http://localhost:8080/v1"  # llama.cpp server
+    # OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
     # Openrouter
-    # OPENAI_API_KEY: str = ""
-    # OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
-    # OPENAI_MODEL: str = "deepseek/deepseek-chat-v3-0324:free"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    # API key will be read from environment variable OPENAI_API_KEY, with fallback to hardcoded value
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy-key-set-OPENAI_API_KEY-environment-variable")
+    OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
+    OPENAI_MODEL: str = "openai/gpt-oss-20b:free"  # Switched from gpt-oss-20b for better structured output compatibility
     
     # Model Adapter Configuration
     # Set to True to force Harmony adapter, False for Standard adapter, None for auto-detection
@@ -45,6 +48,15 @@ class Config:
     # Harmony Model Configuration
     # Additional patterns to detect Harmony models (beyond default gpt-oss patterns)
     HARMONY_MODEL_PATTERNS: list[str] = []  # e.g., ["custom-harmony-model", "local-gpt-oss"]
+    
+    # Model Prefixes Configuration
+    # List of model prefixes that should be handled by any provider
+    # These prefixes will be stripped and passed to the underlying provider without validation errors
+    # Works with OpenRouter, local servers, or any OpenAI-compatible API
+    MODEL_PREFIXES: list[str] = [
+        "qwen", "claude", "anthropic", "google", "gemini", "mistral", 
+        "cohere", "meta", "llama", "deepseek", "perplexity", "cognitivecomputations"
+    ]
     
     # Harmony Service Configuration
     # Whether to automatically start harmony services when harmony models are detected
@@ -57,6 +69,13 @@ class Config:
     HARMONY_SERVICE_STARTUP_TIMEOUT: float = 120.0  # Seconds to wait for service startup
     HARMONY_SERVICE_HEALTH_TIMEOUT: float = 10.0  # Seconds for health check timeout
     HARMONY_SERVICE_SHUTDOWN_TIMEOUT: float = 30.0  # Seconds to wait for graceful shutdown
+    
+    # Harmony Model Generation Configuration
+    # Max tokens for harmony model completions - needs to be high for academic reasoning chains
+    HARMONY_MAX_TOKENS: int = 32768  # Max tokens for experiment responses 
+    
+    # Harmony reasoning effort level - controls model's reasoning depth
+    HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
     
     # Custom harmony service command (leave empty for default openai-harmony service)
     HARMONY_SERVICE_COMMAND: list[str] = []
@@ -75,17 +94,31 @@ class Config:
     # Higher values allow more complex reasoning but take longer to complete
     
     # Evolution agents (most complex architectural tasks)
-    MAX_TURNS_PLANNER: int = 50          # Architecture design and innovation
-    MAX_TURNS_DEDUPLICATION: int = 50    # Analysis and differentiation from existing work
-    MAX_TURNS_MOTIVATION_CHECKER: int = 50  # Motivation comparison and uniqueness validation
-    MAX_TURNS_CODE_CHECKER: int = 50    # Code validation and correctness checking (already set)
+    MAX_TURNS_PLANNER: int = 5          # Architecture design and innovation
+    MAX_TURNS_DEDUPLICATION: int = 5    # Analysis and differentiation from existing work
+    MAX_TURNS_MOTIVATION_CHECKER: int = 5  # Motivation comparison and uniqueness validation
+    MAX_TURNS_CODE_CHECKER: int = 5    # Code validation and correctness checking (already set)
     
     # Analysis agents
-    MAX_TURNS_ANALYZER: int = 50         # Comprehensive result analysis and interpretation
-    MAX_TURNS_SUMMARIZER: int = 50       # Context summarization for database elements (increased for complex synthesis)
+    MAX_TURNS_ANALYZER: int = 5          # Comprehensive result analysis and interpretation
+    MAX_TURNS_SUMMARIZER: int = 5        # Reduced to quickly test tool-call conversion fix
     
     # Training and debugging agents
-    MAX_TURNS_TRAINER: int = 50          # Training script execution and monitoring
-    MAX_TURNS_DEBUGGER: int = 50         # Error analysis and code fixing
+    MAX_TURNS_TRAINER: int = 5          # Training script execution and monitoring
+    MAX_TURNS_DEBUGGER: int = 5         # Error analysis and code fixing
 
     RETRY_INTERVAL: int = 5
+
+    # Debug Configuration
+    DEBUG_AGENT_TURNS: bool = True  # Enable/disable detailed agent turn debugging
+    DEBUG_HARMONY_ENCODING: bool = True  # Enable/disable harmony encoding debugging
+    DEBUG_RESPONSE_CONTENT: bool = True  # Enable/disable response content debugging
+    DISABLE_HARMONY_FOR_DEBUG: bool = False  # Temporarily disable harmony encoding to debug
+    
+    # Harmony Detection Strategy
+    HARMONY_DETECTION_STRATEGY: str = "always"  # Options: "always", "never", "auto", "adaptive"
+    # - "always": Always use harmony encoding for gpt-oss models (REQUIRED for OpenRouter gpt-oss)
+    # - "never": Never use harmony encoding (standard OpenAI format)  
+    # - "auto": Try to detect based on URL (localhost = harmony, others = standard)
+    # - "adaptive": Try harmony first, fall back to standard if it fails
+    # NOTE: OpenRouter's gpt-oss models REQUIRE harmony format to function properly

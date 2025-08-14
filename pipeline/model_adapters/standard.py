@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from .base import ModelAdapter
+from ..agents_config import HarmonyAwareAsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class StandardModelAdapter(ModelAdapter):
             model: Model name to use
         """
         super().__init__(api_key, base_url, model)
-        self.client = AsyncOpenAI(
+        self.client = HarmonyAwareAsyncOpenAI(
             api_key=api_key,
             base_url=base_url
         )

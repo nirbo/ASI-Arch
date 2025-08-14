@@ -11,7 +11,6 @@ import logging
 from typing import Optional, Set, Tuple
 from .base import ModelAdapter
 from .standard import StandardModelAdapter  
-from .harmony import HarmonyModelAdapter
 from .harmony_service import get_service_manager, HarmonyServiceConfig
 
 logger = logging.getLogger(__name__)
@@ -71,13 +70,12 @@ class ModelAdapterFactory:
                 logger.info(f"Force creating Standard adapter for model: {model}")
                 return cls._create_standard_adapter(api_key, base_url, model)
             
-            # Auto-detect based on model name
+            # Use Standard adapter for all models (harmony encoding is now handled in agents_config.py)
             if cls._is_harmony_model(model):
-                logger.info(f"Auto-detected Harmony model: {model}")
-                return cls._create_harmony_adapter(api_key, base_url, model)
+                logger.info(f"Auto-detected Harmony model: {model} - using Standard adapter with automatic harmony encoding")
             else:
                 logger.info(f"Using Standard adapter for model: {model}")
-                return cls._create_standard_adapter(api_key, base_url, model)
+            return cls._create_standard_adapter(api_key, base_url, model)
                 
         except Exception as e:
             logger.error(f"Error creating model adapter: {str(e)}")
@@ -138,19 +136,16 @@ class ModelAdapterFactory:
             else:
                 effective_base_url = base_url
             
-            # Create adapter using synchronous method
+            # Use Standard adapter for all models (harmony encoding is now handled in agents_config.py)
             if force_harmony is True:
-                logger.info(f"Force creating Harmony adapter for model: {model}")
-                adapter = cls._create_harmony_adapter(api_key, effective_base_url, model)
+                logger.info(f"Force creating Standard adapter for Harmony model: {model} - automatic harmony encoding enabled")
             elif force_harmony is False:
                 logger.info(f"Force creating Standard adapter for model: {model}")
-                adapter = cls._create_standard_adapter(api_key, effective_base_url, model)
             elif cls._is_harmony_model(model):
-                logger.info(f"Auto-detected Harmony model: {model}")
-                adapter = cls._create_harmony_adapter(api_key, effective_base_url, model)
+                logger.info(f"Auto-detected Harmony model: {model} - using Standard adapter with automatic harmony encoding")
             else:
                 logger.info(f"Using Standard adapter for model: {model}")
-                adapter = cls._create_standard_adapter(api_key, effective_base_url, model)
+            adapter = cls._create_standard_adapter(api_key, effective_base_url, model)
             
             return adapter, service_started
                 
@@ -203,35 +198,6 @@ class ModelAdapterFactory:
         """
         return StandardModelAdapter(api_key, base_url, model)
     
-    @classmethod
-    def _create_harmony_adapter(
-        cls,
-        api_key: str,
-        base_url: str,
-        model: str
-    ) -> HarmonyModelAdapter:
-        """
-        Create a Harmony model adapter.
-        
-        Args:
-            api_key: API key (may be dummy for local models)
-            base_url: Base URL for harmony service
-            model: Model name
-            
-        Returns:
-            HarmonyModelAdapter instance
-            
-        Raises:
-            ImportError: If openai-harmony library is not available
-        """
-        try:
-            return HarmonyModelAdapter(api_key, base_url, model)
-        except ImportError as e:
-            logger.error("openai-harmony library not found")
-            logger.error("Install with: pip install openai-harmony")
-            raise ImportError(
-                f"Cannot create Harmony adapter for model '{model}': {str(e)}"
-            ) from e
     
     @classmethod
     def get_supported_models(cls) -> dict:
@@ -247,7 +213,7 @@ class ModelAdapterFactory:
                 "examples": ["gpt-4o", "gpt-4", "gpt-3.5-turbo", "claude-3-sonnet"]
             },
             "harmony_models": {
-                "description": "Harmony-based models with 3-channel parsing", 
+                "description": "Harmony-based models with automatic unsloth encoding (uses Standard adapter)", 
                 "examples": list(cls.HARMONY_MODEL_PATTERNS)
             }
         }

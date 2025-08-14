@@ -3,6 +3,13 @@ import sys
 import os
 import logging
 
+# Suppress TensorFlow and CUDA warnings BEFORE any imports
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+# Suppress CUDA warnings
+os.environ['CUDA_VISIBLE_DEVICES'] = os.environ.get('CUDA_VISIBLE_DEVICES', '0')
+
 # Add the parent directory to sys.path to allow imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,6 +19,9 @@ logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 
 # Import agents configuration before any agents are created
 from pipeline.agents_config import patch_agents_multi_provider
+
+# Apply the patch to handle any model prefix with OpenRouter
+patch_agents_multi_provider()
 
 from agents import set_default_openai_api, set_default_openai_client, set_tracing_disabled
 from openai import AsyncOpenAI

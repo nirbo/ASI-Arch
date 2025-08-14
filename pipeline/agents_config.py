@@ -261,11 +261,19 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
         try:
             from unsloth_zoo import encode_conversations_with_harmony
             from pipeline.config import Config
+            from pipeline.utils.harmony_json_sanitizer import sanitize_harmony_parameters
             
             messages = kwargs.get('messages', [])
             model = kwargs.get('model', '')
             max_tokens = kwargs.get('max_tokens') or Config.HARMONY_MAX_TOKENS
             temperature = kwargs.get('temperature', 0.7)
+            
+            # Apply bulletproof parameter sanitization BEFORE any processing
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"Applying parameter validation for {model}")
+            
+            # First-pass validation with legacy method for backwards compatibility
+            messages = self._validate_messages_content(messages)
             
             # Detect if this is a JSON output task and what type
             all_content = ' '.join([msg.get('content', '') for msg in messages]).lower()
@@ -307,11 +315,11 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 if is_deduplication_task: detected_agents.append("deduplication")
                 if is_motivation_checker_task: detected_agents.append("motivation_checker")
                 
-                logger.info(f"🔍 TASK DETECTION - json: {is_json_task}, agents: {detected_agents}")
+                logger.debug(f"Task detection - json: {is_json_task}, agents: {detected_agents}")
                 if is_json_task:
-                    logger.info(f"📝 Content sample: {all_content[:300]}...")
+                    logger.debug(f"Content sample: {all_content[:300]}...")
                     if not detected_agents:
-                        logger.warning(f"⚠️  No specific agent type detected, will use generic instructions")
+                        logger.warning(f"No specific agent type detected, will use generic instructions")
             
             # Use unsloth's encode_conversations_with_harmony with task-specific instructions  
             if is_json_task:
@@ -329,12 +337,26 @@ You are FORBIDDEN from proceeding until you:
 🔒 GATE 2 - IMPLEMENTATION REQUIREMENT (BLOCKING):
 You are FORBIDDEN from providing final response until you:
 - MUST call write_code_file function/tool with content parameter containing the new architecture code
+- MUST provide ACTUAL CODE in the content parameter - empty content or [] is INVALID
 - MUST implement actual architectural changes and save them to file
+- TOOL PARAMETER FORMAT: write_code_file(content="class DeltaNet(nn.Module):\n    def __init__(self):\n        # your implementation")
 - This creates your "implementation_token" - without it, final response is INVALID
 
 🔒 GATE 3 - FINAL RESPONSE (UNLOCKED ONLY BY GATES 1+2):
-ONLY after you have BOTH tokens from tool usage, you may provide:
-{"name": "delta_net_your_innovation_name", "motivation": "explanation of what you implemented"}
+ONLY after you have BOTH tokens from tool usage, you MUST provide EXACTLY this JSON format:
+
+REQUIRED FINAL JSON FORMAT (MANDATORY - NO EXCEPTIONS):
+{
+  "name": "delta_net_your_innovation_name",
+  "motivation": "detailed explanation of what architectural changes you implemented and why they improve performance"
+}
+
+CRITICAL JSON REQUIREMENTS:
+- Use EXACTLY the field names "name" and "motivation" 
+- The "name" field must be a descriptive architecture name (e.g., "delta_net_enhanced_attention_v2")
+- The "motivation" field must explain your implementation and expected benefits
+- This JSON must be PROVIDED SEPARATELY after tool usage, not as tool parameters
+- Your final JSON response is the LAST thing you output after completing all tool operations
 
 CRITICAL CONSTRAINTS:
 - Final JSON is LOCKED until BOTH tools are used
@@ -358,7 +380,20 @@ EXECUTION ORDER (RIGID):
 2. write_code_file(content="new_architecture_code") → implement changes  
 3. THEN AND ONLY THEN → final JSON response
 
-Remember: Your task is INCOMPLETE without tool usage. The JSON is the certificate of completion, not the work itself."""
+FUNCTION CALL PARAMETER REQUIREMENTS:
+- read_code_file(): No parameters needed, call as read_code_file()
+- write_code_file(content="..."): MUST provide content parameter with actual code
+- All function parameters must be valid JSON objects: {"content": "code_here"}, not empty arrays []
+- Example valid call: write_code_file({"content": "class DeltaNet(nn.Module):\\n    def __init__(self):\\n        super().__init__()"})
+
+Remember: Your task is INCOMPLETE without tool usage. The JSON is the certificate of completion, not the work itself.
+
+COMPLETE WORKFLOW EXAMPLE:
+1. Call: read_code_file() → analyze current architecture
+2. Call: write_code_file(content="class ImprovedNet(nn.Module):...") → implement changes  
+3. Provide final JSON: {"name": "improved_net_v2", "motivation": "Added attention mechanism to improve accuracy by 15%"}
+
+THE FINAL JSON IS SEPARATE FROM TOOL CALLS - DO NOT CONFUSE THEM!"""
                     model_identity = "You are an Architecture Designer who uses code analysis and modification tools to implement architectural improvements. You work in two distinct phases: first you use tools with their specific parameter schemas, then you provide a final JSON response with name and motivation fields describing your implementation. Your tool usage and final JSON response are completely separate - tool parameters are not part of your final output format."
                 elif is_analyzer_task:
                     developer_instructions = """You are an expert AI architecture researcher specializing in comprehensive analysis of experimental results and architectural modifications.
@@ -656,77 +691,7 @@ REQUIRED OUTPUT FORMAT:
                 developer_instructions = None
                 model_identity = "You are a sophisticated AI assistant specialized in neural architecture analysis and evolution."
             
-            # Extract tools from kwargs before they get filtered out
-            tools = kwargs.get('tools', None)
-            tool_choice = kwargs.get('tool_choice', None)
-            
-            # Debug logging for tool passing
-            if Config.DEBUG_HARMONY_ENCODING:
-                if tools:
-                    tool_names = [tool.get('function', {}).get('name', 'unnamed') if isinstance(tool, dict) else getattr(tool, '__name__', str(tool)) for tool in tools]
-                    logger.info(f"🔧 HARMONY TOOLS: Passing {len(tools)} tools to harmony encoding: {tool_names}")
-                else:
-                    logger.warning(f"⚠️  HARMONY TOOLS: No tools found in kwargs for {model}")
-            
-            encoding_result = encode_conversations_with_harmony(
-                messages=messages,
-                reasoning_effort=Config.HARMONY_REASONING_EFFORT,
-                add_generation_prompt=True,
-                tool_calls=tools,  # Pass tools to harmony encoding
-                developer_instructions=developer_instructions,
-                model_identity=model_identity
-            )
-            
-            # Extract the formatted prompt
-            if isinstance(encoding_result, tuple):
-                formatted_conversation = encoding_result[0]
-            else:
-                formatted_conversation = encoding_result
-                
-            # Conditional debug logging
-            from pipeline.config import Config
-            if Config.DEBUG_HARMONY_ENCODING:
-                logger.info(f"HARMONY ENCODING: Using harmony encoding for model {model}, JSON task: {is_json_task}, max_tokens: {max_tokens}")
-                logger.debug(f"Harmony conversation length: {len(formatted_conversation)} characters")
-            
-            # Use completions API with formatted conversation (filter out chat-specific params)
-            filtered_kwargs = {k: v for k, v in kwargs.items() 
-                             if k not in ['messages', 'model', 'max_tokens', 'temperature', 'tools', 'tool_choice', 'response_format', 'parallel_tool_calls', 'store', 'reasoning_effort', 'metadata']}
-            completion_response = await super().completions.create(
-                model=model,
-                prompt=formatted_conversation,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                **filtered_kwargs
-            )
-            
-            # Extract response text
-            response_text = completion_response.choices[0].text
-            
-            # Check for tool usage patterns in the response
-            tool_usage_patterns = [
-                r'read_code_file\(\)',
-                r'write_code_file\(',
-                r'calling read_code_file',
-                r'calling write_code_file',
-                r'<tool_call',
-                r'function_call',
-                r'tool_calls',
-            ]
-            
-            has_tool_usage = any(re.search(pattern, response_text, re.IGNORECASE) for pattern in tool_usage_patterns)
-            
-            # Clean up harmony channel tokens if present
-            if Config.DEBUG_HARMONY_ENCODING:
-                logger.debug(f"Raw harmony response length: {len(response_text)} characters")
-                logger.debug(f"Raw response preview: {response_text[:500]}...")
-                logger.debug(f"Tool usage detected in response: {has_tool_usage}")
-                # Look for JSON patterns in raw response
-                json_preview_matches = re.findall(r'\{[^{}]{0,100}', response_text)
-                logger.debug(f"📋 JSON patterns found in raw response: {len(json_preview_matches)}")
-                for i, match in enumerate(json_preview_matches[:3]):  # Show first 3
-                    logger.debug(f"   Pattern {i}: {match}...")
-            # Determine primary agent type for response cleaning
+            # Determine primary agent type for tools and response cleaning
             primary_agent_type = None
             if is_planner_task:
                 primary_agent_type = "planner"
@@ -745,6 +710,231 @@ REQUIRED OUTPUT FORMAT:
             elif is_summarizer_task:
                 primary_agent_type = "summarizer"
             
+            # Set agent_type for later use
+            agent_type = primary_agent_type
+            
+            # Extract tools from kwargs before they get filtered out
+            tools = kwargs.get('tools', None)
+            tool_choice = kwargs.get('tool_choice', None)
+            
+            # Handle OpenAI's NotGiven object
+            try:
+                from openai._utils import NOT_GIVEN
+                if tools is NOT_GIVEN:
+                    tools = None
+                if tool_choice is NOT_GIVEN:
+                    tool_choice = None
+            except ImportError:
+                # Fallback: check for NotGiven type by class name or attribute
+                if hasattr(tools, '__class__') and 'NotGiven' in str(type(tools)):
+                    tools = None
+                if hasattr(tool_choice, '__class__') and 'NotGiven' in str(type(tool_choice)):
+                    tool_choice = None
+            
+            # Debug logging for tool passing (only for agents that should have tools)
+            if Config.DEBUG_HARMONY_ENCODING:
+                agent_expects_tools = agent_type in ["planner", "analyzer", "debugger", "code_checker", "deduplication"]
+                if tools and len(tools) > 0:
+                    tool_names = [tool.get('function', {}).get('name', 'unnamed') if isinstance(tool, dict) else getattr(tool, '__name__', str(tool)) for tool in tools]
+                    logger.debug(f"Passing {len(tools)} tools to harmony encoding: {tool_names}")
+                elif agent_expects_tools:
+                    logger.warning(f"Expected tools for {agent_type} agent but none found for {model}")
+                # No logging for agents that don't expect tools (summarizer, trainer, motivation_checker)
+            
+            # Validate parameters before calling encode_conversations_with_harmony
+            # 1. Validate reasoning_effort
+            valid_reasoning_efforts = ["low", "medium", "high"]
+            reasoning_effort = Config.HARMONY_REASONING_EFFORT
+            if reasoning_effort not in valid_reasoning_efforts:
+                logger.warning(f"Invalid reasoning_effort '{reasoning_effort}', using 'medium'")
+                reasoning_effort = "medium"
+            
+            # 2. Validate developer_instructions for JSON-breaking characters
+            if developer_instructions is not None:
+                # Check for potential JSON serialization issues
+                try:
+                    json.dumps(developer_instructions)
+                except json.JSONEncodeError as e:
+                    logger.error(f"Developer instructions contain invalid JSON characters: {e}")
+                    # Use comprehensive JSON escaping
+                    developer_instructions = self._comprehensive_json_escape(developer_instructions)
+                    logger.info("Applied comprehensive JSON cleaning to developer instructions")
+            
+            # 3. Validate tools structure
+            if tools is not None:
+                try:
+                    json.dumps(tools)
+                except json.JSONEncodeError as e:
+                    logger.error(f"Tools contain invalid JSON characters: {e}")
+                    logger.warning("Setting tools to None due to JSON validation failure")
+                    tools = None
+            
+            # 4. Debug logging for parameter validation
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"🔧 Harmony parameters validation:")
+                logger.debug(f"   reasoning_effort: '{reasoning_effort}' (type: {type(reasoning_effort)})")
+                logger.debug(f"   developer_instructions: {len(developer_instructions) if developer_instructions else 0} chars")
+                logger.debug(f"   tools: {len(tools) if tools else 0} items")
+                logger.debug(f"   messages: {len(messages)} items")
+                logger.debug(f"   model_identity: {len(model_identity)} chars")
+            
+            # Validate model_identity before passing to harmony encoding
+            if model_identity:
+                model_identity = self._validate_model_identity(model_identity)
+            
+            # Prepare tools with JSON escaping if needed
+            escaped_tools = None
+            if tools:
+                try:
+                    # Validate tools can be JSON serialized
+                    json.dumps(tools)
+                    escaped_tools = tools
+                except (TypeError, ValueError) as e:
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.warning(f"Tools serialization issue, applying escaping: {e}")
+                    # Apply comprehensive escaping to tool definitions
+                    escaped_tools = []
+                    for tool in tools:
+                        if isinstance(tool, dict):
+                            escaped_tool = {}
+                            for key, value in tool.items():
+                                if isinstance(value, str):
+                                    escaped_tool[key] = self._comprehensive_json_escape(value)
+                                else:
+                                    escaped_tool[key] = value
+                            escaped_tools.append(escaped_tool)
+                        else:
+                            escaped_tools.append(tool)
+            
+            # Apply comprehensive parameter cleaning
+            # This ensures 100% JSON compatibility regardless of input content
+            try:
+                sanitization_params = {
+                    'messages': messages,
+                    'reasoning_effort': reasoning_effort,
+                    'add_generation_prompt': True,
+                    'tool_calls': escaped_tools,
+                    'developer_instructions': developer_instructions,
+                    'model_identity': model_identity,
+                    'debug_mode': Config.DEBUG_HARMONY_ENCODING
+                }
+                
+                sanitized_params = sanitize_harmony_parameters(**sanitization_params)
+                
+                # Remove debug_mode parameter as it's not accepted by encode_conversations_with_harmony
+                if 'debug_mode' in sanitized_params:
+                    del sanitized_params['debug_mode']
+                
+                # Additional safety: validate that each parameter is absolutely JSON-safe
+                for param_name, param_value in sanitized_params.items():
+                    try:
+                        json.dumps(param_value)
+                    except (TypeError, ValueError, json.JSONDecodeError) as param_error:
+                        logger.warning(f"Parameter {param_name} still not JSON-safe after sanitization: {param_error}")
+                        # Replace with safe fallback
+                        if param_name == 'messages':
+                            sanitized_params[param_name] = [{'role': 'user', 'content': 'Safe fallback message'}]
+                        elif param_name == 'developer_instructions':
+                            sanitized_params[param_name] = 'Safe fallback instructions'
+                        elif param_name == 'tool_calls':
+                            sanitized_params[param_name] = None
+                        else:
+                            sanitized_params[param_name] = None
+                
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.debug(f"Parameter validation completed successfully")
+                    logger.debug(f"   Messages: {len(sanitized_params.get('messages', []))} items")
+                    logger.debug(f"   Developer instructions: {len(str(sanitized_params.get('developer_instructions', ''))) if sanitized_params.get('developer_instructions') else 0} chars")
+                    logger.debug(f"   Tools: {len(sanitized_params.get('tool_calls', [])) if sanitized_params.get('tool_calls') else 0} items")
+                
+            except Exception as e:
+                logger.error(f"Parameter validation failed: {e}")
+                # Ultra-fallback: use minimal safe parameters
+                sanitized_params = {
+                    'messages': [{'role': 'user', 'content': 'Fallback message due to sanitization failure'}],
+                    'reasoning_effort': 'medium',
+                    'add_generation_prompt': True,
+                    'tool_calls': None,
+                    'developer_instructions': 'Fallback instructions due to sanitization failure',
+                    'model_identity': 'Fallback identity due to sanitization failure'
+                }
+                logger.warning("Using ultra-safe fallback parameters")
+            
+            # Call encode_conversations_with_harmony with bulletproof sanitized parameters  
+            # Note: unsloth_zoo handles tool conversion internally, we just pass OpenAI format
+            # GPT-OSS specific: Use ONLY the exact parameters that encode_conversations_with_harmony expects
+            # Based on signature: (messages, reasoning_effort='medium', add_generation_prompt=True, 
+            #                     tool_calls=None, developer_instructions=None, model_identity='...')
+            gpt_oss_params = {
+                'messages': sanitized_params.get('messages', []),
+                'reasoning_effort': sanitized_params.get('reasoning_effort', 'medium'),
+                'add_generation_prompt': sanitized_params.get('add_generation_prompt', True),
+                'tool_calls': sanitized_params.get('tool_calls'),  # Can be None
+                'developer_instructions': sanitized_params.get('developer_instructions'),  # Can be None
+                'model_identity': sanitized_params.get('model_identity', 'You are ChatGPT, a large language model trained by OpenAI.')
+            }
+            
+            # Remove None values to use function defaults
+            gpt_oss_params = {k: v for k, v in gpt_oss_params.items() if v is not None}
+                    
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"GPT-OSS harmony parameters: {list(gpt_oss_params.keys())}")
+                
+            encoding_result = encode_conversations_with_harmony(**gpt_oss_params)
+            
+            # Extract the formatted prompt
+            if isinstance(encoding_result, tuple):
+                formatted_conversation = encoding_result[0]
+            else:
+                formatted_conversation = encoding_result
+                
+            # Conditional debug logging
+            from pipeline.config import Config
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.info(f"HARMONY ENCODING: Using harmony encoding for model {model}, JSON task: {is_json_task}, max_tokens: {max_tokens}")
+                logger.debug(f"Harmony conversation length: {len(formatted_conversation)} characters")
+            
+            # Use completions API with formatted conversation (filter out chat-specific params)
+            filtered_kwargs = {k: v for k, v in kwargs.items() 
+                             if k not in ['messages', 'model', 'max_tokens', 'temperature', 'tools', 'tool_choice', 'response_format', 'parallel_tool_calls', 'store', 'reasoning_effort', 'metadata', 'debug_mode']}
+            completion_response = await super().completions.create(
+                model=model,
+                prompt=formatted_conversation,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **filtered_kwargs
+            )
+            
+            # Extract response text
+            response_text = completion_response.choices[0].text
+            
+            # Clean up harmony channel tokens if present
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"📦 RAW HARMONY RESPONSE:")
+                logger.debug(f"   Length: {len(response_text)} characters")
+                logger.debug(f"   First 500 chars: {response_text[:500]}...")
+                
+                # Look for specific harmony patterns in raw response
+                channel_count = response_text.count('<|channel|>')
+                message_count = response_text.count('<|message|>')
+                call_count = response_text.count('<|call|>')
+                logger.debug(f"   Harmony tokens - channels: {channel_count}, messages: {message_count}, calls: {call_count}")
+                
+                # Show function-related patterns in raw response
+                function_refs = re.findall(r'functions\.\w+', response_text)
+                logger.debug(f"   Function references found: {function_refs}")
+                
+                # Show any read_code_file or write_code_file mentions
+                read_mentions = response_text.count('read_code_file')
+                write_mentions = response_text.count('write_code_file')
+                logger.debug(f"   Tool mentions - read_code_file: {read_mentions}, write_code_file: {write_mentions}")
+                # Look for JSON patterns in raw response
+                json_preview_matches = re.findall(r'\{[^{}]{0,100}', response_text)
+                logger.debug(f"📋 JSON patterns found in raw response: {len(json_preview_matches)}")
+                for i, match in enumerate(json_preview_matches[:3]):  # Show first 3
+                    logger.debug(f"   Pattern {i}: {match}...")
+            # Agent type already determined above
+            
             if Config.DEBUG_HARMONY_ENCODING:
                 logger.debug(f"🎯 Primary agent type for response cleaning: {primary_agent_type}")
                 
@@ -762,10 +952,86 @@ REQUIRED OUTPUT FORMAT:
                         logger.debug(f"Invalid JSON content: {cleaned_response}")
             
             # Create ChatCompletion response compatible with OpenAI Agents
-            return self._create_chat_completion_response(cleaned_response, model, completion_response)
+            # Pass both full response (for tool extraction) and cleaned response (for final content)
+            return self._create_chat_completion_response(response_text, cleaned_response, model, completion_response)
             
         except ImportError as e:
             logger.error(f"Unsloth import failed for harmony encoding: {e}")
+            # Fallback to standard chat completion
+            return await super().chat.completions.create(**kwargs)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing error in harmony encoding: {e}")
+            logger.error(f"   Error details - Line: {e.lineno}, Column: {e.colno}, Position: {getattr(e, 'pos', 'unknown')}")
+            
+            # Detailed error location analysis
+            if hasattr(e, 'pos') and e.pos is not None:
+                error_pos = e.pos
+                logger.error(f"JSON error location analysis:")
+                logger.error(f"   Error position: {error_pos}")
+                if error_pos == 2486:
+                    logger.error("   This matches the original reported error position")
+                
+                # Try to identify what parameter caused the issue
+                logger.error(f"Parameter analysis at time of error:")
+                for param_name, param_value in kwargs.items():
+                    if isinstance(param_value, str):
+                        logger.error(f"   {param_name}: {len(param_value)} chars")
+                    elif isinstance(param_value, list):
+                        logger.error(f"   {param_name}: {len(param_value)} items")
+                    elif isinstance(param_value, dict):
+                        logger.error(f"   {param_name}: {len(param_value)} keys")
+                    else:
+                        logger.error(f"   {param_name}: {type(param_value)}")
+            
+            # Multiple fallback levels for JSON errors
+            retry_level = getattr(self, '_json_retry_level', 0)
+            max_retries = 3
+            
+            if retry_level < max_retries:
+                self._json_retry_level = retry_level + 1
+                logger.warning(f"JSON error retry {retry_level + 1}/{max_retries}: Attempting fallback level {retry_level + 1}")
+                
+                try:
+                    if retry_level == 0:
+                        # Level 1: Re-sanitize with more aggressive cleaning
+                        logger.info(f"   Level 1: Re-applying parameter sanitization with aggressive mode")
+                        # CRITICAL: Don't pass OpenAI objects in retry - use only essential parameters
+                        essential_kwargs = {
+                            'messages': kwargs.get('messages', []),
+                            'model': kwargs.get('model', ''),
+                            'tools': kwargs.get('tools'),
+                            'max_tokens': kwargs.get('max_tokens'),
+                            'temperature': kwargs.get('temperature'),
+                        }
+                        # Remove None values
+                        essential_kwargs = {k: v for k, v in essential_kwargs.items() if v is not None}
+                        return await self.chat_completions_create_harmony(**essential_kwargs)
+                        
+                    elif retry_level == 1:
+                        # Level 2: Use emergency simplified parameters
+                        logger.info(f"   Level 2: Using emergency simplified parameters")
+                        emergency_kwargs = self._create_emergency_parameters(kwargs)
+                        return await self.chat_completions_create_harmony(**emergency_kwargs)
+                        
+                    elif retry_level == 2:
+                        # Level 3: Minimal safe parameters
+                        logger.info(f"   Level 3: Using minimal safe parameters")
+                        minimal_kwargs = self._create_minimal_safe_parameters(kwargs)
+                        return await self.chat_completions_create_harmony(**minimal_kwargs)
+                        
+                except Exception as retry_error:
+                    logger.error(f"Retry level {retry_level + 1} failed: {retry_error}")
+                    # Continue to next retry level or final fallback
+                    
+                finally:
+                    # Don't reset retry level here - let it increment for next attempt
+                    pass
+            
+            # Reset retry level for next request
+            if hasattr(self, '_json_retry_level'):
+                delattr(self, '_json_retry_level')
+            
+            logger.error(f"All harmony encoding retries failed - falling back to standard chat completion")
             # Fallback to standard chat completion
             return await super().chat.completions.create(**kwargs)
         except (TypeError, ValueError) as e:
@@ -778,14 +1044,214 @@ REQUIRED OUTPUT FORMAT:
             logger.exception("Full harmony encoding error traceback")
             return await super().chat.completions.create(**kwargs)
     
+    def _validate_messages_content(self, messages: List[Dict]) -> List[Dict]:
+        """Validate and sanitize message content for JSON compatibility."""
+        validated_messages = []
+        for i, message in enumerate(messages):
+            if isinstance(message, dict) and 'content' in message:
+                try:
+                    # Test if content is JSON-serializable
+                    json.dumps(message['content'])
+                    validated_messages.append(message)
+                except json.JSONDecodeError as e:
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.warning(f"Message {i} content contains invalid JSON characters: {e}")
+                    # Clean the message content
+                    cleaned_content = self._comprehensive_json_escape(message['content'])
+                    validated_message = message.copy()
+                    validated_message['content'] = cleaned_content
+                    validated_messages.append(validated_message)
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.info(f"Cleaned message {i} content for JSON compatibility")
+            else:
+                validated_messages.append(message)
+        return validated_messages
+    
+    def _validate_model_identity(self, model_identity: str) -> str:
+        """Validate model identity parameter for JSON serialization."""
+        if not model_identity:
+            return model_identity
+        try:
+            json.dumps(model_identity)
+            return model_identity
+        except json.JSONDecodeError as e:
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.warning(f"Model identity contains invalid JSON characters: {e}")
+            cleaned = self._comprehensive_json_escape(model_identity)
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.info("Cleaned model identity for JSON compatibility")
+            return cleaned
+    
+    def _convert_tools_to_harmony_format(self, openai_tools: List[Dict]) -> str:
+        """Convert OpenAI tools format to harmony TypeScript format for proper parameter generation."""
+        if not openai_tools:
+            return ""
+        
+        typescript_functions = ["namespace functions {", ""]
+        
+        for tool in openai_tools:
+            if tool.get('type') == 'function' and 'function' in tool:
+                func_def = tool['function']
+                func_name = func_def.get('name', 'unknown_function')
+                func_desc = func_def.get('description', f'Function {func_name}')
+                parameters = func_def.get('parameters', {})
+                
+                # Add function comment
+                typescript_functions.append(f"  // {func_desc}")
+                
+                # Build parameter type definition
+                if parameters and parameters.get('properties'):
+                    param_lines = ["  type " + func_name + " = (_: {"]
+                    
+                    properties = parameters['properties']
+                    required_params = parameters.get('required', [])
+                    
+                    for param_name, param_info in properties.items():
+                        param_type = self._get_typescript_type(param_info.get('type', 'string'))
+                        param_desc = param_info.get('description', f'Parameter {param_name}')
+                        optional_marker = '' if param_name in required_params else '?'
+                        
+                        param_lines.append(f"    /** {param_desc} */")
+                        param_lines.append(f"    {param_name}{optional_marker}: {param_type};")
+                    
+                    param_lines.append("  }) => any;")
+                    typescript_functions.extend(param_lines)
+                else:
+                    # No parameters - simple function
+                    typescript_functions.append(f"  type {func_name} = () => any;")
+                
+                typescript_functions.append("")  # Empty line between functions
+        
+        typescript_functions.append("}")
+        
+        return "\n".join(typescript_functions)
+    
+    def _get_typescript_type(self, json_type: str) -> str:
+        """Convert JSON schema type to TypeScript type."""
+        type_mapping = {
+            'string': 'string',
+            'number': 'number', 
+            'integer': 'number',
+            'boolean': 'boolean',
+            'array': 'any[]',
+            'object': 'any'
+        }
+        return type_mapping.get(json_type, 'any')
+    
+    def _create_emergency_parameters(self, original_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Create emergency simplified parameters for JSON error fallback."""
+        emergency_params = {}
+        
+        # Simplified messages
+        original_messages = original_kwargs.get('messages', [])
+        if original_messages:
+            # Keep first and last message with simplified content
+            simplified_messages = []
+            if len(original_messages) > 0:
+                first_msg = original_messages[0]
+                simplified_messages.append({
+                    'role': first_msg.get('role', 'user'),
+                    'content': 'Simplified message due to encoding issues'
+                })
+            if len(original_messages) > 1:
+                last_msg = original_messages[-1]
+                simplified_messages.append({
+                    'role': last_msg.get('role', 'user'),
+                    'content': 'Simplified message due to encoding issues'
+                })
+            emergency_params['messages'] = simplified_messages
+        else:
+            emergency_params['messages'] = [{'role': 'user', 'content': 'Emergency message'}]
+        
+        # Simplified other parameters
+        emergency_params['model'] = original_kwargs.get('model', 'gpt-oss-20b')
+        emergency_params['max_tokens'] = original_kwargs.get('max_tokens', 1000)
+        emergency_params['temperature'] = original_kwargs.get('temperature', 0.7)
+        emergency_params['tools'] = None  # Remove tools to eliminate complexity
+        emergency_params['tool_choice'] = None
+        
+        return emergency_params
+    
+    def _create_minimal_safe_parameters(self, original_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Create minimal safe parameters guaranteed to work."""
+        return {
+            'messages': [{'role': 'user', 'content': 'Minimal safe message'}],
+            'model': original_kwargs.get('model', 'gpt-oss-20b'),
+            'max_tokens': 500,
+            'temperature': 0.7
+        }
+    
+    def _comprehensive_json_escape(self, text: str) -> str:
+        """Comprehensively validate and clean JSON-breaking characters."""
+        if not text:
+            return text
+        
+        try:
+            # Test if text can be serialized as JSON string value
+            json.dumps(text)
+            return text
+        except (TypeError, ValueError, UnicodeDecodeError):
+            # Comprehensive cleaning for JSON string embedding
+            cleaned = text
+            
+            # Handle backslashes first (must be done before quote escaping)
+            # Only escape backslashes that aren't already part of escape sequences
+            cleaned = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', cleaned)
+            
+            # Escape double quotes that aren't already escaped
+            cleaned = re.sub(r'(?<!\\)"', r'\\"', cleaned)
+            
+            # Escape newlines, carriage returns, and tabs if not already escaped
+            cleaned = re.sub(r'(?<!\\)\n', r'\\n', cleaned)
+            cleaned = re.sub(r'(?<!\\)\r', r'\\r', cleaned)  
+            cleaned = re.sub(r'(?<!\\)\t', r'\\t', cleaned)
+            
+            # Escape form feed and backspace
+            cleaned = cleaned.replace('\f', '\\f')
+            cleaned = cleaned.replace('\b', '\\b')
+            
+            # Remove or escape problematic Unicode control characters
+            # Keep printable chars, spaces, and common Unicode ranges
+            cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', cleaned)
+            
+            # Handle problematic Unicode characters that can break JSON parsing
+            cleaned = re.sub(r'[\u2028\u2029]', '', cleaned)  # Line/paragraph separators
+            
+            # Final validation
+            try:
+                json.dumps(cleaned)
+                return cleaned
+            except (TypeError, ValueError, UnicodeDecodeError) as e:
+                logger.error(f"Could not fix JSON validation after comprehensive cleaning: {e}")
+                # Ultra-safe fallback: keep only basic printable ASCII
+                safe_text = re.sub(r'[^\x20-\x7E\t\n\r]', '', text)
+                # Escape the safe text properly
+                safe_text = safe_text.replace('\\', '\\\\').replace('"', '\\"')
+                safe_text = safe_text.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                return safe_text
+    
     def _clean_harmony_response(self, response_text: str, is_json_task: bool, agent_type: str = None) -> str:
         """Clean harmony channel tokens and extract final content."""
         try:
             cleaned = response_text.strip()
             
+            # Detect tool usage patterns in response
+            tool_usage_patterns = [
+                r'read_code_file\(\)',
+                r'write_code_file\(',
+                r'run_training_script\(',
+                r'<tool_call',
+                r'function_call',
+                r'tool_calls',
+            ]
+            
+            has_tool_usage = any(re.search(pattern, response_text, re.IGNORECASE) for pattern in tool_usage_patterns)
+            
             # Check for harmony channel tokens
             if '<|channel|>' in cleaned:
-                # Extract final channel content
+                from pipeline.config import Config
+                
+                # Extract final channel content first (highest priority)
                 final_patterns = [
                     r'<\|channel\|>final<\|message\|>(.*?)(?=<\|channel\||<\|start\||<\|end\||$)',
                     r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*?)(?=<\|channel\||<\|start\||<\|end\||$)'
@@ -795,24 +1261,67 @@ REQUIRED OUTPUT FORMAT:
                     final_match = re.search(pattern, cleaned, re.DOTALL)
                     if final_match:
                         final_content = final_match.group(1).strip()
-                        # Try to extract JSON if this is a JSON task
+                        
+                        if Config.DEBUG_HARMONY_ENCODING:
+                            logger.debug(f"🎯 FINAL CHANNEL: Found final channel content: {final_content[:200]}...")
+                        
+                        # For JSON tasks, extract and validate JSON from final channel
                         if is_json_task:
-                            json_match = re.search(r'\{.*\}', final_content, re.DOTALL)
+                            # Remove any trailing harmony tokens
+                            final_content = re.sub(r'<\|.*?$', '', final_content).strip()
+                            
+                            # Extract JSON object from final content
+                            json_match = re.search(r'\{.*?\}', final_content, re.DOTALL)
                             if json_match:
                                 try:
-                                    json.loads(json_match.group(0))
-                                    return json_match.group(0)
-                                except json.JSONDecodeError:
-                                    pass
-                        return final_content
+                                    candidate_json = json_match.group(0)
+                                    parsed = json.loads(candidate_json)
+                                    
+                                    # Validate it's not a tool call JSON for agent tasks
+                                    if agent_type in ["planner", "deduplication"]:
+                                        name_value = parsed.get("name", "")
+                                        is_tool_call = name_value in ["read_code_file", "write_code_file", "run_training_script"]
+                                        
+                                        if not is_tool_call and "name" in parsed and "motivation" in parsed:
+                                            if Config.DEBUG_HARMONY_ENCODING:
+                                                logger.debug(f"✅ FINAL CHANNEL: Valid {agent_type} JSON found: {candidate_json[:100]}...")
+                                            return candidate_json
+                                        elif Config.DEBUG_HARMONY_ENCODING:
+                                            logger.debug(f"🔧 FINAL CHANNEL: Filtered tool call from final channel: {name_value}")
+                                    else:
+                                        # For other agent types, return valid JSON from final channel
+                                        if Config.DEBUG_HARMONY_ENCODING:
+                                            logger.debug(f"✅ FINAL CHANNEL: Valid JSON found for {agent_type}: {candidate_json[:100]}...")
+                                        return candidate_json
+                                        
+                                except json.JSONDecodeError as e:
+                                    if Config.DEBUG_HARMONY_ENCODING:
+                                        logger.debug(f"❌ FINAL CHANNEL: Invalid JSON in final channel: {e}")
+                            
+                            # If no valid JSON in final channel, try extracting text response
+                            if final_content and not final_content.startswith('{'):
+                                if Config.DEBUG_HARMONY_ENCODING:
+                                    logger.debug(f"📝 FINAL CHANNEL: Non-JSON content in final channel: {final_content[:100]}...")
+                                # Continue to fallback logic for JSON extraction
+                        else:
+                            # Non-JSON task, return final channel content directly
+                            return final_content
                 
                 # If no final channel but this is a JSON task, try to extract JSON from anywhere
                 if is_json_task:
                     from pipeline.config import Config
                     
-                    # Find all JSON objects in the response
+                    # Find all JSON objects in the response (objects only, not arrays)
                     all_json_matches = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned, re.DOTALL)
                     all_json_matches.extend(re.findall(r'\{.*?\}', cleaned, re.DOTALL))
+                    
+                    # Also find arrays (which might be tool parameters from harmony)
+                    array_matches = re.findall(r'\[[^\[\]]*\]', cleaned)
+                    
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"🔍 JSON EXTRACTION: Found {len(all_json_matches)} objects and {len(array_matches)} arrays")
+                        for i, arr in enumerate(array_matches[:3]):  # Show first 3 arrays
+                            logger.debug(f"   Array {i}: {arr}")
                     
                     valid_jsons = []
                     for json_candidate in all_json_matches:
@@ -833,16 +1342,32 @@ REQUIRED OUTPUT FORMAT:
                     
                     # Prioritize JSON based on agent type
                     if agent_type == "planner" or agent_type == "deduplication":
-                        # Look for JSON with name+motivation schema
+                        # Look for JSON with name+motivation schema, but exclude tool call JSON
                         for json_str, parsed in valid_jsons:
                             if isinstance(parsed, dict) and "name" in parsed and "motivation" in parsed:
-                                if Config.DEBUG_HARMONY_ENCODING:
-                                    logger.debug(f"✅ Found {agent_type} JSON with correct schema: {json_str[:100]}...")
-                                return json_str
+                                # Critical fix: Exclude tool call JSON by checking if "name" contains function names
+                                name_value = parsed.get("name", "")
+                                is_tool_call = (
+                                    name_value in ["read_code_file", "write_code_file", "run_training_script"] or
+                                    "function" in name_value.lower() or 
+                                    "call" in name_value.lower() or
+                                    "arguments" in parsed  # Tool calls often have arguments field
+                                )
+                                
+                                if not is_tool_call:
+                                    if Config.DEBUG_HARMONY_ENCODING:
+                                        logger.debug(f"Found {agent_type} JSON with correct schema (excluding tool calls): {json_str[:100]}...")
+                                    return json_str
+                                elif Config.DEBUG_HARMONY_ENCODING:
+                                    logger.debug(f"Filtered out tool call JSON: name='{name_value}', keys={list(parsed.keys())}")
                         
                         # If no correct schema found, log all candidates and use fallback
                         if Config.DEBUG_HARMONY_ENCODING:
-                            logger.warning(f"❌ No {agent_type} JSON with name+motivation found. All JSON keys: {[list(p.keys()) for _, p in valid_jsons]}")
+                            logger.warning(f"No {agent_type} JSON with name+motivation found (after tool call filtering). All JSON keys: {[list(p.keys()) for _, p in valid_jsons]}")
+                            logger.debug(f"Raw harmony response sample: {response_text[:500]}...")
+                            logger.debug(f"Valid JSONs found: {len(valid_jsons)}")
+                            for i, (json_str, parsed) in enumerate(valid_jsons):
+                                logger.debug(f"  JSON {i+1}: {json_str[:100]}...")
                     elif agent_type == "analyzer":
                         # Look for JSON with analyzer schema (5 fields)
                         required_fields = ["design_evaluation", "experimental_results_analysis", "expectation_vs_reality_comparison", "theoretical_explanation_with_evidence", "synthesis_and_insights"]
@@ -883,12 +1408,27 @@ REQUIRED OUTPUT FORMAT:
                     
                     # If no schema-correct JSON found, check if we have non-tool-parameter JSONs before fallback
                     if valid_jsons:
-                        # Filter out obvious tool parameter JSONs
+                        # Filter out obvious tool parameter JSONs (including arrays)
                         non_tool_jsons = []
                         for json_str, parsed in valid_jsons:
-                            if isinstance(parsed, dict):
-                                # Check if this looks like tool parameters
+                            if isinstance(parsed, list):
+                                # Arrays are likely tool parameters from harmony models
+                                if Config.DEBUG_HARMONY_ENCODING:
+                                    logger.debug(f"   Filtering out array as tool param: {json_str}")
+                                continue
+                            elif isinstance(parsed, dict):
+                                # Enhanced tool parameter detection
                                 keys = set(parsed.keys())
+                                
+                                # Direct tool call patterns
+                                is_direct_tool_call = (
+                                    "name" in parsed and parsed.get("name") in ["read_code_file", "write_code_file", "run_training_script"] or
+                                    "function" in keys or
+                                    "tool_call" in keys or
+                                    "arguments" in keys
+                                )
+                                
+                                # Tool parameter patterns  
                                 tool_param_patterns = [
                                     {"path", "depth"},  # read_code_file parameters
                                     {"path", "content"},  # write_code_file parameters
@@ -896,6 +1436,7 @@ REQUIRED OUTPUT FORMAT:
                                     {"depth"},  # single depth parameter
                                     {"architecture_name"},  # run_training_script parameters
                                     {"script", "args"},  # potential script execution parameters
+                                    {"content"},  # write_code_file content only
                                 ]
                                 
                                 is_tool_param = any(
@@ -903,8 +1444,16 @@ REQUIRED OUTPUT FORMAT:
                                     for pattern in tool_param_patterns
                                 )
                                 
-                                if not is_tool_param:
+                                if not is_direct_tool_call and not is_tool_param:
                                     non_tool_jsons.append((json_str, parsed))
+                                elif Config.DEBUG_HARMONY_ENCODING:
+                                    if is_direct_tool_call:
+                                        logger.debug(f"   Filtering out direct tool call: {json_str[:100]}...")
+                                    else:
+                                        logger.debug(f"   Filtering out tool param: {json_str[:100]}...")
+                            else:
+                                # Handle other types (shouldn't happen but just in case)
+                                non_tool_jsons.append((json_str, parsed))
                         
                         # If we have non-tool JSONs, prefer the last one
                         if non_tool_jsons:
@@ -1017,15 +1566,189 @@ REQUIRED OUTPUT FORMAT:
             logger.warning(f"Error cleaning harmony response: {e}")
             return response_text
     
-    def _create_chat_completion_response(self, content: str, model: str, original_response) -> ChatCompletion:
+    def _normalize_tool_args(self, args_str: str) -> str:
+        """Normalize tool arguments, converting empty arrays to empty objects."""
+        if not args_str:
+            return '{}'
+        
+        args_str = args_str.strip()
+        
+        # If it's an empty array, convert to empty object
+        if args_str == '[]':
+            return '{}'
+        
+        # If it starts with [ (array), convert to empty object (tools expect objects)
+        if args_str.startswith('[') and args_str.endswith(']'):
+            return '{}'
+        
+        # If it's already a valid object, return as-is
+        if args_str.startswith('{') and args_str.endswith('}'):
+            return args_str
+        
+        # Default fallback
+        return args_str if args_str else '{}'
+    
+    def _create_chat_completion_response(self, full_response: str, final_content: str, model: str, original_response) -> ChatCompletion:
         """Create a ChatCompletion response from cleaned content."""
         from openai.types.chat import ChatCompletion, ChatCompletionMessage
+        from openai.types.chat.chat_completion import Choice
         from openai.types.completion_usage import CompletionUsage
+        import json
+        import re
+        from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
+        from openai.types.chat.chat_completion_message_tool_call import Function
+        
+        # Try to extract tool calls from the full harmony response
+        tool_calls = None
+        # Use the passed final_content for the message content
+        
+        # Look for function call patterns in the harmony response
+        tool_call_patterns = [
+            # HARMONY CHANNEL FORMAT - Primary patterns for harmony models (most specific first)
+            (r'<\|channel\|>commentary to=functions\.(\w+)\s*<\|constrain\|>json<\|message\|>([^<]*?)<\|call\|>', 
+             lambda m: m.group(1), lambda m: self._normalize_tool_args(m.group(2).strip())),
+            (r'<\|channel\|>commentary to=functions\.(\w+)\s*<\|constrain\|>json<\|message\|>([^<]*?)(?=<\||\Z)', 
+             lambda m: m.group(1), lambda m: self._normalize_tool_args(m.group(2).strip())),
+            # Additional harmony variations without <|call|> token or constrain token
+            (r'<\|channel\|>commentary to=functions\.(\w+)[^<]*?<\|message\|>([^<]*?)(?=<\|channel\||<\|start\||<\|end\||$)',
+             lambda m: m.group(1), lambda m: self._normalize_tool_args(m.group(2).strip())),
+            # Harmony format without constrain token (most flexible)
+            (r'<\|channel\|>commentary to=functions\.(\w+)\s*<\|message\|>([^<]*?)(?=<\||\Z)',
+             lambda m: m.group(1), lambda m: self._normalize_tool_args(m.group(2).strip())),
+            
+            # Simple read_code_file calls
+            (r'read_code_file\(\)', 'read_code_file', '{}'),
+            (r'calling read_code_file', 'read_code_file', '{}'),
+            # write_code_file with various content formats
+            (r'write_code_file\(\s*content\s*=\s*["\']([^"\']*)["\']', 'write_code_file', lambda m: json.dumps({"content": m.group(1)})),
+            (r'write_code_file\(\s*content\s*=\s*"""([^"]*)"""', 'write_code_file', lambda m: json.dumps({"content": m.group(1)})),
+            (r'write_code_file\(\s*([^)]*)\s*\)', 'write_code_file', lambda m: json.dumps({"content": m.group(1).strip().strip('"\'')}) if m.group(1).strip() else "{}"),
+            (r'calling write_code_file', 'write_code_file', '{}'),
+            # Run training script calls
+            (r'run_training_script\(\s*([^)]*)\s*\)', 'run_training_script', lambda m: json.dumps({"architecture_name": m.group(1).strip().strip('"\'')}) if m.group(1).strip() else "{}"),
+            (r'calling run_training_script', 'run_training_script', '{}'),
+            # Generic function call format
+            (r'<tool_call[^>]*>([^<]+)</tool_call>', None, lambda m: m.group(1))  # Extract function name dynamically
+        ]
+        
+        from pipeline.config import Config
+        if Config.DEBUG_HARMONY_ENCODING:
+            logger.debug(f"🔧 TOOL EXTRACTION: Checking full_response for tool calls: {full_response[:200]}...")
+            logger.debug(f"🔧 TOOL EXTRACTION: Full response length: {len(full_response)} chars")
+            logger.debug(f"🔧 TOOL EXTRACTION: Final content: {final_content[:100]}...")
+            # Show patterns being tested
+            logger.debug(f"🔧 TOOL EXTRACTION: Testing {len(tool_call_patterns)} patterns...")
+            
+            # Look for harmony channel patterns specifically
+            harmony_channels = re.findall(r'<\|channel\|>[^<]*?<\|message\|>', full_response, re.DOTALL)
+            logger.debug(f"🔧 HARMONY CHANNELS: Found {len(harmony_channels)} channel blocks")
+            for i, channel in enumerate(harmony_channels[:3]):  # Show first 3
+                logger.debug(f"   Channel {i}: {channel[:100]}...")
+        
+        # Extract ALL tool calls from the full response, not just the first one
+        all_tool_calls = []
+        working_content = full_response
+        
+        for i, (pattern, function_name, args_extractor) in enumerate(tool_call_patterns):
+            matches = list(re.finditer(pattern, working_content, re.IGNORECASE | re.DOTALL))
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"🔧 PATTERN {i}: {pattern[:100]}... -> Found {len(matches)} matches")
+            
+            for match in matches:
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.debug(f"✅ PATTERN {i} MATCHED! Groups: {match.groups()}")
+                    logger.debug(f"   Full match: {match.group(0)[:200]}...")
+                    
+                function_args = None  # Initialize for each iteration
+                current_function_name = function_name  # Don't modify the original
+                
+                # Handle dynamic function name extraction (including harmony patterns)
+                if callable(current_function_name):
+                    extracted_function_name = current_function_name(match)
+                    current_function_name = extracted_function_name
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"   Extracted function name: {current_function_name}")
+                elif current_function_name is None and callable(args_extractor):
+                    # Legacy generic pattern handling
+                    extracted = args_extractor(match)
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"   Generic pattern extracted: {extracted}")
+                    if isinstance(extracted, str) and '(' in extracted:
+                        # Parse function call format: "function_name(args)"
+                        func_match = re.match(r'(\w+)\((.*)\)', extracted.strip())
+                        if func_match:
+                            current_function_name = func_match.group(1)
+                            function_args = func_match.group(2).strip() if func_match.group(2).strip() else "{}"
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.debug(f"   Parsed function: {current_function_name}, args: {function_args}")
+                        else:
+                            if Config.DEBUG_HARMONY_ENCODING:
+                                logger.debug(f"   Failed to parse function call format")
+                            continue
+                    else:
+                        if Config.DEBUG_HARMONY_ENCODING:
+                            logger.debug(f"   Not a function call format")
+                        continue
+                
+                # Extract arguments (if not already done above)
+                if function_args is None:
+                    if callable(args_extractor):
+                        function_args = args_extractor(match)
+                        if Config.DEBUG_HARMONY_ENCODING:
+                            logger.debug(f"   Extracted args via callable: {function_args}")
+                    else:
+                        function_args = args_extractor
+                        if Config.DEBUG_HARMONY_ENCODING:
+                            logger.debug(f"   Using static args: {function_args}")
+                
+                # Skip if we couldn't determine the function name
+                if not current_function_name:
+                    if Config.DEBUG_HARMONY_ENCODING:
+                        logger.debug(f"   Skipping - no function name determined")
+                    continue
+                    
+                # Create tool call
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.debug(f"🔧 CREATING TOOL CALL:")
+                    logger.debug(f"   Function name: '{current_function_name}'")
+                    logger.debug(f"   Function args: '{function_args}'")
+                    logger.debug(f"   Args type: {type(function_args)}")
+                    
+                tool_call = ChatCompletionMessageToolCall(
+                    id=f"call_{current_function_name}_{len(all_tool_calls)}",
+                    function=Function(
+                        name=current_function_name,
+                        arguments=function_args
+                    ),
+                    type="function"
+                )
+                all_tool_calls.append(tool_call)
+                
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.debug(f"✅ TOOL EXTRACTION: Found {current_function_name} call with args: {function_args[:100] if len(str(function_args)) > 100 else function_args}...")
+                    
+            # Remove all matches of this pattern from content for next iteration
+            if matches:
+                working_content = re.sub(pattern, '', working_content, flags=re.IGNORECASE | re.DOTALL)
+                
+        # Set tool_calls to the collected list, or None if empty
+        tool_calls = all_tool_calls if all_tool_calls else None
+        # Use the passed final_content instead of working_content
+        
+        if Config.DEBUG_HARMONY_ENCODING:
+            if tool_calls:
+                logger.debug(f"✅ TOTAL TOOL EXTRACTION: Found {len(tool_calls)} tool calls")
+                for i, tc in enumerate(tool_calls):
+                    logger.debug(f"   Tool call {i}: {tc.function.name}({tc.function.arguments[:50]}...)")
+            else:
+                logger.debug("❌ TOOL EXTRACTION: No tool calls found in harmony response")
+            logger.debug(f"🧹 FINAL CONTENT: {final_content[:100]}...")
         
         # Create the response structure
         message = ChatCompletionMessage(
             role="assistant",
-            content=content
+            content=final_content if final_content else None,
+            tool_calls=tool_calls
         )
         
         # Use original response usage if available
@@ -1035,18 +1758,65 @@ REQUIRED OUTPUT FORMAT:
             total_tokens=len(content.split()) // 2
         )
         
-        return ChatCompletion(
+        # Create proper Choice object (this was the bug - was creating plain dict)
+        choice = Choice(
+            index=0,
+            message=message,
+            finish_reason='stop'
+        )
+        
+        # Debug logging for ChatCompletion object structure
+        from pipeline.config import Config
+        if Config.DEBUG_HARMONY_ENCODING:
+            logger.debug(f"🔧 CHATCOMPLETION DEBUG: Creating ChatCompletion object")
+            logger.debug(f"   Choice type: {type(choice)}")
+            logger.debug(f"   Choice attributes: {dir(choice)}")
+            logger.debug(f"   Message type: {type(message)}")
+            logger.debug(f"   Message attributes: {dir(message)}")
+            logger.debug(f"   Message content: {message.content[:100] if message.content else None}...")
+            logger.debug(f"   Message tool_calls: {len(message.tool_calls) if message.tool_calls else 0}")
+        
+        chat_completion = ChatCompletion(
             id=original_response.id if hasattr(original_response, 'id') else "chatcmpl-harmony",
-            choices=[{
-                'index': 0,
-                'message': message,
-                'finish_reason': 'stop'
-            }],
+            choices=[choice],  # Now using proper Choice object, not dict
             created=original_response.created if hasattr(original_response, 'created') else 0,
             model=model,
             object="chat.completion",
             usage=usage
         )
+        
+        # Additional debug logging for the complete object
+        if Config.DEBUG_HARMONY_ENCODING:
+            logger.debug(f"🔧 CHATCOMPLETION DEBUG: Created ChatCompletion")
+            logger.debug(f"   ChatCompletion type: {type(chat_completion)}")
+            logger.debug(f"   ChatCompletion attributes: {dir(chat_completion)}")
+            logger.debug(f"   Choices length: {len(chat_completion.choices)}")
+            logger.debug(f"   First choice type: {type(chat_completion.choices[0])}")
+            logger.debug(f"   First choice message type: {type(chat_completion.choices[0].message)}")
+            # Test agent library expectations
+            try:
+                test_message = chat_completion.choices[0].message
+                logger.debug(f"✅ CHATCOMPLETION DEBUG: choices[0].message accessible")
+                logger.debug(f"   Message role: {test_message.role}")
+                logger.debug(f"   Message content exists: {test_message.content is not None}")
+                logger.debug(f"   Message tool_calls exists: {test_message.tool_calls is not None}")
+                if test_message.tool_calls:
+                    for i, tc in enumerate(test_message.tool_calls):
+                        logger.debug(f"   Tool call {i}: {tc.function.name}({tc.function.arguments[:100]}...)")
+            except Exception as e:
+                logger.error(f"❌ CHATCOMPLETION DEBUG: Error accessing choices[0].message: {e}")
+        
+        # CRITICAL FIX: Add messages attribute for agents library compatibility
+        # The agents library expects result.messages, but ChatCompletion has choices
+        # We add a messages attribute that points to the choice messages for compatibility
+        if hasattr(chat_completion, 'choices') and chat_completion.choices:
+            # Create a messages list that agents library can access
+            chat_completion.messages = [choice.message for choice in chat_completion.choices]
+            if Config.DEBUG_HARMONY_ENCODING:
+                logger.debug(f"🔧 AGENTS COMPATIBILITY: Added messages attribute with {len(chat_completion.messages)} messages")
+                logger.debug(f"   Message 0 has tool_calls: {chat_completion.messages[0].tool_calls is not None}")
+        
+        return chat_completion
 
 
 class OpenRouterProvider(ModelProvider):
@@ -1131,14 +1901,11 @@ def patch_agents_multi_provider():
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
     
-    # Create a custom provider map that includes qwen and other prefixes
+    # Create a custom provider map that includes configurable model prefixes
     provider_map = MultiProviderMap()
     
-    # Add common OpenRouter prefixes
-    common_prefixes = [
-        "qwen", "claude", "anthropic", "google", "gemini", "mistral", 
-        "cohere", "meta", "llama", "deepseek", "perplexity"
-    ]
+    # Get model prefixes from config (works with any provider: OpenRouter, local servers, etc.)
+    common_prefixes = Config.MODEL_PREFIXES
     
     for prefix in common_prefixes:
         provider_map.add_provider(prefix, create_openrouter_provider(
@@ -1168,7 +1935,7 @@ def patch_agents_multi_provider():
     # Apply the patch
     MultiProvider.__init__ = patched_init
     
-    print("Successfully patched MultiProvider for OpenRouter compatibility")
+    print("Successfully patched MultiProvider for compatibility")
 
 # Apply the patch when this module is imported
 patch_agents_multi_provider()

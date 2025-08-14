@@ -1,5 +1,5 @@
-FROM gpt-oss:20b
-PARAMETER num_ctx 52000
+FROM ~/ml-tools/gpt-oss-20b-f16/gpt-oss-20b-Q8_0.gguf
+PARAMETER num_ctx 48000
 PARAMETER temperature 1.0
 PARAMETER min_p 0.05
 PARAMETER top_k 40

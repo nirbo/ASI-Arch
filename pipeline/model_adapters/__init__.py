@@ -1,22 +1,24 @@
 """
 Model Adapters Package
 
-This package provides a dual-mode architecture for handling both standard OpenAI models
+This package provides a simplified architecture for handling both standard OpenAI models
 and Harmony-based models (gpt-oss) within ASI-Arch.
 
 The architecture consists of:
 - ModelAdapter: Abstract base class defining the common interface
-- StandardModelAdapter: Handles traditional OpenAI API models
-- HarmonyModelAdapter: Handles gpt-oss models with 3-channel parsing
+- StandardModelAdapter: Handles all models (harmony encoding handled automatically in agents_config.py)
 - ModelAdapterFactory: Creates appropriate adapters based on model name
 - ModelClientManager: Unified client interface for the pipeline
 - HarmonyServiceManager: Manages harmony service lifecycle
 - HarmonyServiceConfig: Configuration for harmony services
+
+Note: Harmony models (gpt-oss) now use automatic unsloth encoding via the 
+HarmonyAwareAsyncOpenAI wrapper in agents_config.py, eliminating the need for 
+a separate HarmonyModelAdapter class.
 """
 
 from .base import ModelAdapter
 from .standard import StandardModelAdapter
-from .harmony import HarmonyModelAdapter
 from .factory import ModelAdapterFactory
 from .client_manager import ModelClientManager
 from .harmony_service import (
@@ -30,7 +32,6 @@ from .harmony_service import (
 __all__ = [
     "ModelAdapter",
     "StandardModelAdapter", 
-    "HarmonyModelAdapter",
     "ModelAdapterFactory",
     "ModelClientManager",
     "HarmonyServiceManager",

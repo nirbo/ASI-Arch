@@ -136,8 +136,38 @@ class AgentLogger:
             self._write_pipeline_log(start_log)  # Also write to pipeline log
         
         try:
+            # Add debugging for max_turns issues (conditional)
+            from pipeline.config import Config
+            if Config.DEBUG_AGENT_TURNS:
+                max_turns = kwargs.get('max_turns', 'not_specified')
+                self.log_debug(f"Starting agent {agent_name} with max_turns={max_turns}")
+                if hasattr(agent, '_name') or hasattr(agent, 'name'):
+                    agent_info = getattr(agent, '_name', getattr(agent, 'name', 'unknown'))
+                    self.log_debug(f"Agent info: {agent_info}")
+            
             # Execute agent call
             result = await Runner.run(agent, input=input_data, **kwargs)
+            
+            # Debug information about the result (conditional)
+            if Config.DEBUG_AGENT_TURNS:
+                max_turns = kwargs.get('max_turns', 'not_specified')
+                if hasattr(result, 'messages') and result.messages:
+                    num_messages = len(result.messages)
+                    self.log_debug(f"Agent {agent_name} completed with {num_messages} messages/turns")
+                    
+                    # Check if close to max turns (only if max_turns is a number)
+                    try:
+                        if isinstance(max_turns, (int, float)) and num_messages >= max_turns * 0.9:
+                            self.log_warning(f"Agent {agent_name} used {num_messages} turns, close to max_turns={max_turns}")
+                            # Log last few messages to see what's happening
+                            last_messages = result.messages[-3:] if num_messages >= 3 else result.messages
+                            for i, msg in enumerate(last_messages):
+                                msg_preview = str(msg)[:200] + "..." if len(str(msg)) > 200 else str(msg)
+                                self.log_debug(f"Last message {i+1}: {msg_preview}")
+                    except Exception as e:
+                        self.log_debug(f"Error checking turn count: {e}")
+                else:
+                    self.log_debug(f"Agent {agent_name} result has no messages attribute or empty messages")
             
             # Extract usage information from agents library return result
             usage_info = self._extract_usage_from_result(result)
@@ -164,16 +194,33 @@ class AgentLogger:
             return result
             
         except Exception as e:
+            # Enhanced debugging for max turns exceeded errors
+            error_str = str(e)
+            error_type = type(e).__name__
+            
+            if "max turns" in error_str.lower() or "turns" in error_str.lower():
+                self.log_error(f"AGENT TURNS ERROR: {agent_name} failed with {error_type}: {error_str}")
+                self.log_error(f"Agent {agent_name} was called with max_turns={kwargs.get('max_turns', 'not_specified')}")
+                
+                # Try to extract more details from the exception
+                if hasattr(e, '__dict__'):
+                    for key, value in e.__dict__.items():
+                        if value is not None:
+                            self.log_debug(f"Exception attribute {key}: {value}")
+            else:
+                self.log_error(f"Agent {agent_name} failed with {error_type}: {error_str}")
+            
             # Record error
             error_log = {
                 "call_id": call_id,
                 "timestamp": datetime.now().isoformat(),
                 "agent_name": agent_name,
                 "status": "failed",
-                "error": str(e),
-                "error_type": type(e).__name__,
+                "error": error_str,
+                "error_type": error_type,
                 "pipeline_id": self.current_pipeline_id,  # Add pipeline_id
-                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}  # Usage is 0 on error
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},  # Usage is 0 on error
+                "max_turns_requested": kwargs.get('max_turns', 'not_specified')  # Add debugging info
             }
             
             self._write_log(error_log)
