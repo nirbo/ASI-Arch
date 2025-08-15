@@ -1231,6 +1231,15 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                     # If not correct format, continue to conversion logic below
                 except json.JSONDecodeError:
                     pass
+            # For planner, we need to check if it's the correct schema
+            elif agent_type == "planner":
+                try:
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and "name" in parsed and "motivation" in parsed:
+                        return content  # Already correct format
+                    # If not correct format, continue to conversion logic below
+                except json.JSONDecodeError:
+                    pass
             else:
                 return content  # Already JSON or empty for other agents
             
@@ -1240,6 +1249,38 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
             
             # DEBUG: Log what planner is receiving
             logger.warning(f"🔧 PLANNER DEBUG: Received content: {repr(content_clean[:150])}")
+            
+            # If content is wrong-format JSON (e.g., summarizer format), extract useful content
+            if content_clean.startswith('{'):
+                try:
+                    parsed = json.loads(content_clean)
+                    if isinstance(parsed, dict):
+                        # If it contains 'experience' field (wrong format), extract content
+                        if "experience" in parsed:
+                            experience_content = parsed["experience"]
+                            logger.warning(f"🔧 PLANNER: Converting wrong JSON format to planner format")
+                            return json.dumps({
+                                "name": "converted_architecture",
+                                "motivation": "Extracted from incorrectly formatted response",
+                                "code": f"# Architecture implementation\n# {experience_content[:500]}..."
+                            })
+                        # If it has other unexpected fields, try to extract useful content
+                        elif not ("name" in parsed and "motivation" in parsed):
+                            # Extract any useful content
+                            useful_content = ""
+                            for key, value in parsed.items():
+                                if isinstance(value, str) and len(value) > 20:
+                                    useful_content = value[:500]
+                                    break
+                            if useful_content:
+                                logger.warning(f"🔧 PLANNER: Converting unexpected JSON format to planner format")
+                                return json.dumps({
+                                    "name": "extracted_architecture",
+                                    "motivation": "Extracted from unexpected JSON format",
+                                    "code": f"# Architecture implementation\n# {useful_content}..."
+                                })
+                except json.JSONDecodeError:
+                    pass
             
             # If planner content contains harmony conversation, don't put it in code field
             if (content_clean.startswith('analysis') and 'json{' in content_clean) or \
