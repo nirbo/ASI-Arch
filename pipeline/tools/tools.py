@@ -100,9 +100,9 @@ def write_code_file(content: str) -> Dict[str, Any]:
             print(f"⚠️  {error_msg}")
             # Don't fail here, but log the warning
         
-        # Check for required Model class for training compatibility  
-        if 'class Model(' not in content:
-            error_msg = "Missing required 'class Model(' in architecture code - needed for training script compatibility"
+        # Check for required Model alias for training compatibility  
+        if 'Model = ' not in content and 'class Model(' not in content:
+            error_msg = "Missing required 'Model = DeltaNet' alias or 'class Model(' in architecture code - needed for training script compatibility"
             print(f"❌ {error_msg}")
             return {
                 'success': False,

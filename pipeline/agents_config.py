@@ -1194,8 +1194,8 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 if hasattr(response, 'choices') and response.choices:
                     raw_content = response.choices[0].text if hasattr(response.choices[0], 'text') else str(response.choices[0])
                     logger.info(f"🔧 RAW MODEL RESPONSE: Length = {len(raw_content)}")
-                    logger.info(f"🔧 RAW MODEL RESPONSE: First 500 chars = {raw_content[:500]}")
-                    logger.info(f"🔧 RAW MODEL RESPONSE: Last 500 chars = {raw_content[-500:]}")
+                    # logger.info(f"🔧 RAW MODEL RESPONSE: First 500 chars = {raw_content[:500]}")
+                    # logger.info(f"🔧 RAW MODEL RESPONSE: Last 500 chars = {raw_content[-500:]}")
                     
                     # Look for harmony tokens to understand format
                     harmony_tokens = ['<|start|>', '<|channel|>', '<|message|>', '<|end|>', '<|return|>', '<|call|>']
