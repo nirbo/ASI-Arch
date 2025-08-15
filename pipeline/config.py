@@ -61,7 +61,7 @@ class Config:
     HARMONY_MAX_TOKENS: int = 43000  # Max tokens for experiment responses 
     
     # Harmony reasoning effort level - controls model's reasoning depth
-    HARMONY_REASONING_EFFORT: str = "low"  # Options: "low", "medium", "high"
+    HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
     
     # Embedding Model Configuration
     EMBEDDING_MODEL: str = "doubao-embedding-large-text-240915"  # Embedding model for vector search
@@ -89,5 +89,5 @@ class Config:
 
     # Debug Configuration
     DEBUG_AGENT_TURNS: bool = True  # Enable/disable detailed agent turn debugging
-    DEBUG_HARMONY_ENCODING: bool = True  # Enable/disable harmony encoding debugging
+    DEBUG_HARMONY_ENCODING: bool = False  # Enable/disable harmony encoding debugging
     DEBUG_RESPONSE_CONTENT: bool = True  # Enable/disable response content debugging

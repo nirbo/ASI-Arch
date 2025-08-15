@@ -90,5 +90,22 @@ def update(result: DataElement) -> bool:
     Returns:
         True if update successful
     """
-    db.add_element_from_dict(result.to_dict())
-    return True
+    # Debug: print the data being sent to help diagnose 500 error
+    result_dict = result.to_dict()
+    print(f"DEBUG: Sending data to database API:")
+    print(f"  - name: {result_dict.get('name')}")
+    print(f"  - result keys: {list(result_dict.get('result', {}).keys())}")
+    print(f"  - parent: {result_dict.get('parent')}")
+    print(f"  - result dict size: {len(str(result_dict))}")
+    
+    try:
+        db.add_element_from_dict(result_dict)
+        return True
+    except Exception as e:
+        print(f"ERROR: Database update failed: {e}")
+        print(f"ERROR: Exception type: {type(e)}")
+        if hasattr(e, 'detail'):
+            print(f"ERROR: Detail: {e.detail}")
+        if hasattr(e, 'status_code'):
+            print(f"ERROR: Status code: {e.status_code}")
+        raise

@@ -49,6 +49,11 @@ async def analyse(
         'test': test_result
     }
     
+    # Debug: print result_dict structure
+    print(f"DEBUG ANALYSE: result_dict keys: {list(result_dict.keys())}")
+    print(f"DEBUG ANALYSE: train_result type: {type(train_result)}")
+    print(f"DEBUG ANALYSE: test_result type: {type(test_result)}")
+    
     # Use timestamped name for lookup, but replace with original name
     increment(result_dict, name, original_name, 'train')
     increment(result_dict, name, original_name, 'test')
@@ -203,12 +208,31 @@ def _build_reference_context(ref_elements: dict) -> str:
 
 def _ref_elements_context(ref_element: DataElement) -> str:
     """Generate context string for a reference element."""
-    return f"""### Reference Experiment {ref_element.name}
+    try:
+        # Debug: check the structure of ref_element.result
+        print(f"DEBUG REF_ELEMENT: name={ref_element.name}")
+        print(f"DEBUG REF_ELEMENT: result type={type(ref_element.result)}")
+        print(f"DEBUG REF_ELEMENT: result keys={list(ref_element.result.keys()) if isinstance(ref_element.result, dict) else 'not a dict'}")
+        
+        train_data = ref_element.result.get("train", "No training data available")
+        test_data = ref_element.result.get("test", "No test data available")
+        
+        return f"""### Reference Experiment {ref_element.name}
 #### Experiment Motivation
 {ref_element.motivation}
 #### Experiment Result
-**Training Progression**: {ref_element.result["train"]}
-**Evaluation Results**: {ref_element.result["test"]}
+**Training Progression**: {train_data}
+**Evaluation Results**: {test_data}
+"""
+    except Exception as e:
+        print(f"ERROR in _ref_elements_context: {e}")
+        print(f"ERROR: ref_element.result = {ref_element.result}")
+        # Return a safe fallback
+        return f"""### Reference Experiment {ref_element.name}
+#### Experiment Motivation
+{ref_element.motivation}
+#### Experiment Result
+**Results**: Error accessing result data: {e}
 """
 
 

@@ -364,32 +364,33 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
         all_content = ' '.join([msg.get('content', '') for msg in messages if msg.get('content')]).lower()
         
         # Task detection keywords (shared between harmony and standard paths)
-        planner_keywords = ['architecture designer', 'write_code_file', 'read_code_file', 'deltanet', 'neural network architectures', 'name:', 'motivation:', 'implementation first']
-        summarizer_keywords = ['systematic evaluator', 'experience synthesis', 'performance analysis context', 'experimental_performance_context', 'experience']
+        planner_keywords = ['architecture designer', 'write_code_file', 'read_code_file', 'deltanet', 'neural network architectures', 'name:', 'motivation:', 'implementation first', 'breakthrough researcher', 'implement', 'provide code', 'architecture evolution']
+        summarizer_keywords = ['systematic evaluator', 'experience synthesis', 'performance analysis context', 'experimental_performance_context', 'experience synthesis task', 'synthesis instructions', 'comprehensive experience summary', 'guide future architectural innovations', 'synthesize these experimental results', 'experience synthesizer']
         analyzer_keywords = ['architecture performance analyzer', 'comprehensive analysis of experimental results', 'design evaluation', 'expectation vs reality', 'theoretical explanation with evidence', 'synthesis and insights']
         trainer_keywords = ['training runner', 'training execution expert', 'run_training_script', 'script execution success', 'training completed successfully']
         debugger_keywords = ['training code debugger', 'debugging expert', 'training failures', 'minimal code fixes', 'resolve technical correctness', 'preservation constraints']
-        code_checker_keywords = ['code checker and fixer', 'code validator', 'technical correctness', 'validation workflow', 'batch size independence', 'mask correctness']
+        code_checker_keywords = ['code checker and fixer', 'code validator', 'technical correctness', 'validation workflow', 'batch size independence', 'mask correctness', 'check the implemented code for critical issues', 'mask correctness check', 'complexity analysis', 'chunkwise implementation', 'dynamic shape handling']
         deduplication_keywords = ['innovation diversifier', 'breakthrough researcher', 'genuinely novel', 'revolutionary alternatives', 'orthogonal innovation design', 'mandatory tool usage']
         motivation_checker_keywords = ['motivation_checker', 'duplicate motivations', 'semantic extraction', 'comparative analysis', 'duplication determination', 'research analysis expert']
         
         # Determine agent type from message content (priority order - most specific first)
-        if any(keyword in all_content for keyword in planner_keywords):
+        # Check code_checker before planner since it's more specific
+        if any(keyword in all_content for keyword in code_checker_keywords):
+            return "code_checker"
+        elif any(keyword in all_content for keyword in motivation_checker_keywords):
+            return "motivation_checker"
+        elif any(keyword in all_content for keyword in deduplication_keywords):
+            return "deduplication"
+        elif any(keyword in all_content for keyword in debugger_keywords):
+            return "debugger"
+        elif any(keyword in all_content for keyword in trainer_keywords):
+            return "trainer"
+        elif any(keyword in all_content for keyword in analyzer_keywords):
+            return "analyzer"
+        elif any(keyword in all_content for keyword in planner_keywords):
             return "planner"
         elif any(keyword in all_content for keyword in summarizer_keywords):
             return "summarizer"
-        elif any(keyword in all_content for keyword in analyzer_keywords):
-            return "analyzer"
-        elif any(keyword in all_content for keyword in trainer_keywords):
-            return "trainer"
-        elif any(keyword in all_content for keyword in debugger_keywords):
-            return "debugger"
-        elif any(keyword in all_content for keyword in code_checker_keywords):
-            return "code_checker"
-        elif any(keyword in all_content for keyword in deduplication_keywords):
-            return "deduplication"
-        elif any(keyword in all_content for keyword in motivation_checker_keywords):
-            return "motivation_checker"
         
         return None  # Unknown agent type
     
@@ -657,7 +658,7 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
         elif agent_type in ["trainer", "code_checker"]:
             return json.dumps({
                 "success": True,
-                "error": None
+                "error": ""
             })
             
         elif agent_type == "debugger":
@@ -1109,17 +1110,119 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
             extracted_content = ""  # Ensure we don't return None
         
         # Convert to agent-appropriate JSON format if needed
-        if agent_type and extracted_content and not extracted_content.strip().startswith('{'):
-            return self._format_content_for_agent(extracted_content, agent_type)
+        if agent_type and extracted_content:
+            if not extracted_content.strip().startswith('{'):
+                # Content is not JSON, format it
+                return self._format_content_for_agent(extracted_content, agent_type)
+            else:
+                # Content looks like JSON, but it might be malformed
+                # For motivation_checker, always validate and fix JSON
+                if agent_type == "motivation_checker":
+                    logger.debug(f"🔧 MOTIVATION_CHECKER: Processing JSON-like content")
+                    return self._format_content_for_agent(extracted_content, agent_type)
         
         return extracted_content or ""
+    
+    def _fix_malformed_json(self, json_str: str) -> str:
+        """Fix common JSON issues like nested unescaped quotes."""
+        import re
+        
+        # Find judgement_reason field and fix nested quotes
+        start_marker = '"judgement_reason": "'
+        start_idx = json_str.find(start_marker)
+        
+        if start_idx != -1:
+            value_start = start_idx + len(start_marker)
+            remaining = json_str[value_start:]
+            
+            # Find the last quote before the closing brace
+            last_quote_idx = remaining.rfind('"')
+            
+            if last_quote_idx != -1:
+                reason_value = remaining[:last_quote_idx]
+                # Escape internal quotes
+                fixed_reason = reason_value.replace('"', '\\"')
+                # Reconstruct the JSON
+                fixed_json = json_str[:value_start] + fixed_reason + json_str[value_start + last_quote_idx:]
+                return fixed_json
+        
+        return json_str
     
     def _format_content_for_agent(self, content: str, agent_type: str) -> str:
         """Format content for specific agent types."""
         import json
         
-        if not content or content.strip().startswith('{'):
-            return content  # Already JSON or empty
+        # For motivation_checker, always check and fix JSON (even if empty)
+        if agent_type == "motivation_checker":
+            # Handle empty content first
+            if not content or not content.strip():
+                return json.dumps({
+                    "is_repeated": False,
+                    "repeated_index": [],
+                    "judgement_reason": "Empty response received from motivation checker"
+                })
+        
+        if not content:
+            return content
+        
+        # Continue motivation_checker handling for non-empty content
+        if agent_type == "motivation_checker":
+            # Clean Unicode characters first
+            cleaned_content = content.replace("—", "-").replace(""", '"').replace(""", '"').replace("'", "'").replace("'", "'").replace("‑", "-")
+            
+            # Check if content is wrapped in {"response": "..."} format
+            if cleaned_content.strip().startswith('{"response":'):
+                try:
+                    response_data = json.loads(cleaned_content)
+                    inner_content = response_data.get("response", "")
+                    
+                    # Look for JSON within the response content
+                    # Pattern: "assistantfinal json{...}"
+                    import re
+                    json_match = re.search(r'assistantfinal json(\{.*\})', inner_content, re.DOTALL)
+                    if json_match:
+                        potential_json = json_match.group(1)
+                        try:
+                            # Try to parse the extracted JSON
+                            parsed = json.loads(potential_json)
+                            if 'is_repeated' in parsed:
+                                return json.dumps(parsed)
+                        except json.JSONDecodeError:
+                            # Try to fix nested quotes
+                            fixed_json = self._fix_malformed_json(potential_json)
+                            try:
+                                parsed = json.loads(fixed_json)
+                                if 'is_repeated' in parsed:
+                                    return json.dumps(parsed)
+                            except json.JSONDecodeError:
+                                pass
+                except json.JSONDecodeError:
+                    pass
+            
+            # If content starts with { and is not wrapped, try direct parsing
+            elif cleaned_content.strip().startswith('{'):
+                try:
+                    json.loads(cleaned_content)
+                    return cleaned_content  # Valid JSON
+                except json.JSONDecodeError:
+                    # Try to fix malformed JSON
+                    fixed_json = self._fix_malformed_json(cleaned_content)
+                    try:
+                        json.loads(fixed_json)
+                        return fixed_json  # Fixed JSON
+                    except json.JSONDecodeError:
+                        pass  # Fall through to regular formatting
+            
+            # Fallback for motivation_checker: create valid JSON from any content
+            safe_content = cleaned_content.replace('"', '\\"').replace('\n', ' ').replace('\r', '')[:200]
+            return json.dumps({
+                "is_repeated": False,
+                "repeated_index": [],
+                "judgement_reason": f"Unable to parse motivation checker response. Content: {safe_content}..."
+            })
+        
+        if content.strip().startswith('{'):
+            return content  # Already JSON or empty for other agents
             
         # Convert to agent-appropriate JSON format
         if agent_type == "planner":
@@ -1158,7 +1261,7 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
         elif agent_type == "trainer":
             return json.dumps({
                 "success": True,
-                "error": None
+                "error": ""
             })
         elif agent_type == "code_checker":
             # CODE_CHECKER MUST ALWAYS RETURN: {"success": bool, "error": str}
@@ -1178,29 +1281,6 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 "name": "harmony_deduplication_result",
                 "motivation": f"Deduplication analysis: {content[:200]}...",
                 "code": content.strip()
-            })
-        elif agent_type == "motivation_checker":
-            # Clean content to avoid JSON encoding issues with Unicode characters
-            cleaned_content = content.replace("—", "-").replace(""", '"').replace(""", '"').replace("'", "'").replace("'", "'")
-            
-            # Try to parse if it's already JSON
-            if content.strip().startswith('{'):
-                try:
-                    parsed = json.loads(cleaned_content)
-                    if 'is_repeated' in parsed:
-                        # Return cleaned version
-                        return json.dumps({
-                            "is_repeated": parsed.get("is_repeated", False),
-                            "repeated_index": parsed.get("repeated_index", []),
-                            "judgement_reason": str(parsed.get("judgement_reason", "")).replace("—", "-").replace(""", '"').replace(""", '"')
-                        })
-                except json.JSONDecodeError:
-                    pass
-            
-            return json.dumps({
-                "is_repeated": False,
-                "repeated_index": [],
-                "judgement_reason": f"Analysis: {cleaned_content[:200]}..."
             })
         
         # Fallback for unknown agent types
@@ -1368,33 +1448,34 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 all_content = ' '.join([msg.get('content', '') for msg in messages if msg.get('content')])
                 
                 # Task detection keywords (copied from main method)
-                planner_keywords = ['architecture designer', 'write_code_file', 'read_code_file', 'deltanet', 'neural network architectures', 'name:', 'motivation:', 'implementation first']
-                summarizer_keywords = ['systematic evaluator', 'experience synthesis', 'performance analysis context', 'experimental_performance_context', 'experience']
+                planner_keywords = ['architecture designer', 'write_code_file', 'read_code_file', 'deltanet', 'neural network architectures', 'name:', 'motivation:', 'implementation first', 'breakthrough researcher', 'implement', 'provide code', 'architecture evolution']
+                summarizer_keywords = ['systematic evaluator', 'experience synthesis', 'performance analysis context', 'experimental_performance_context', 'experience synthesis task', 'synthesis instructions', 'comprehensive experience summary', 'guide future architectural innovations', 'synthesize these experimental results', 'experience synthesizer']
                 analyzer_keywords = ['architecture performance analyzer', 'comprehensive analysis of experimental results', 'design evaluation', 'expectation vs reality', 'theoretical explanation with evidence', 'synthesis and insights']
                 trainer_keywords = ['training runner', 'training execution expert', 'run_training_script', 'script execution success', 'training completed successfully']
                 debugger_keywords = ['training code debugger', 'debugging expert', 'training failures', 'minimal code fixes', 'resolve technical correctness', 'preservation constraints']
-                code_checker_keywords = ['code checker and fixer', 'code validator', 'technical correctness', 'validation workflow', 'batch size independence', 'mask correctness']
+                code_checker_keywords = ['code checker and fixer', 'code validator', 'technical correctness', 'validation workflow', 'batch size independence', 'mask correctness', 'check the implemented code for critical issues', 'mask correctness check', 'complexity analysis', 'chunkwise implementation', 'dynamic shape handling']
                 deduplication_keywords = ['innovation diversifier', 'breakthrough researcher', 'genuinely novel', 'revolutionary alternatives', 'orthogonal innovation design', 'mandatory tool usage']
                 motivation_checker_keywords = ['motivation_checker', 'duplicate motivations', 'semantic extraction', 'comparative analysis', 'duplication determination', 'research analysis expert']
                 
                 # Determine agent type from message content
+                # Check code_checker before planner since it's more specific
                 detected_agent_type = None
-                if any(keyword in all_content for keyword in planner_keywords):
-                    detected_agent_type = "planner"
-                elif any(keyword in all_content for keyword in summarizer_keywords):
-                    detected_agent_type = "summarizer"
-                elif any(keyword in all_content for keyword in analyzer_keywords):
-                    detected_agent_type = "analyzer"
-                elif any(keyword in all_content for keyword in trainer_keywords):
-                    detected_agent_type = "trainer"
-                elif any(keyword in all_content for keyword in debugger_keywords):
-                    detected_agent_type = "debugger"
-                elif any(keyword in all_content for keyword in code_checker_keywords):
+                if any(keyword in all_content for keyword in code_checker_keywords):
                     detected_agent_type = "code_checker"
-                elif any(keyword in all_content for keyword in deduplication_keywords):
-                    detected_agent_type = "deduplication"
                 elif any(keyword in all_content for keyword in motivation_checker_keywords):
                     detected_agent_type = "motivation_checker"
+                elif any(keyword in all_content for keyword in deduplication_keywords):
+                    detected_agent_type = "deduplication"
+                elif any(keyword in all_content for keyword in debugger_keywords):
+                    detected_agent_type = "debugger"
+                elif any(keyword in all_content for keyword in trainer_keywords):
+                    detected_agent_type = "trainer"
+                elif any(keyword in all_content for keyword in analyzer_keywords):
+                    detected_agent_type = "analyzer"
+                elif any(keyword in all_content for keyword in summarizer_keywords):
+                    detected_agent_type = "summarizer"
+                elif any(keyword in all_content for keyword in planner_keywords):
+                    detected_agent_type = "planner"
                 
                 # Pass agent type to local harmony method
                 kwargs['agent_type'] = detected_agent_type
@@ -1420,12 +1501,12 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 'expert ai researcher', 'experimental context', 'key insights', 'takeaways'
             ]
             # Detect agent task types with unique signatures - order matters for priority
-            summarizer_keywords = ['experience synthesizer', 'concise experience summary', 'synthesizing experimental findings', 'single key', 'transferable experience']
-            planner_keywords = ['architecture designer', 'write_code_file', 'read_code_file', 'deltanet', 'neural network architectures', 'name:', 'motivation:', 'implementation first']
+            summarizer_keywords = ['experience synthesizer', 'concise experience summary', 'synthesizing experimental findings', 'single key', 'transferable experience', 'experience synthesis task', 'synthesis instructions', 'comprehensive experience summary', 'guide future architectural innovations', 'synthesize these experimental results']
+            planner_keywords = ['architecture designer', 'write_code_file', 'read_code_file', 'deltanet', 'neural network architectures', 'name:', 'motivation:', 'implementation first', 'breakthrough researcher', 'implement', 'provide code', 'architecture evolution']
             analyzer_keywords = ['architecture performance analyzer', 'comprehensive analysis of experimental results', 'design evaluation', 'expectation vs reality', 'theoretical explanation with evidence', 'synthesis and insights']
             trainer_keywords = ['training runner', 'training execution expert', 'run_training_script', 'script execution success', 'training completed successfully']
             debugger_keywords = ['training code debugger', 'debugging expert', 'training failures', 'minimal code fixes', 'resolve technical correctness', 'preservation constraints']
-            code_checker_keywords = ['code checker and fixer', 'code validator', 'technical correctness', 'validation workflow', 'batch size independence', 'mask correctness']
+            code_checker_keywords = ['code checker and fixer', 'code validator', 'technical correctness', 'validation workflow', 'batch size independence', 'mask correctness', 'check the implemented code for critical issues', 'mask correctness check', 'complexity analysis', 'chunkwise implementation', 'dynamic shape handling']
             deduplication_keywords = ['innovation diversifier', 'breakthrough researcher', 'genuinely novel', 'revolutionary alternatives', 'orthogonal innovation design', 'mandatory tool usage']
             motivation_checker_keywords = ['motivation_checker', 'duplicate motivations', 'semantic extraction', 'comparative analysis', 'duplication determination', 'research analysis expert']
             
@@ -1484,8 +1565,8 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
                     developer_instructions = """You are a debugging expert. Use write_code_file to fix issues, then provide JSON: {"changes_made": "description of fixes applied"}"""
                     model_identity = "You are a debugging expert. Provide JSON output."
                 elif is_summarizer_task:
-                    developer_instructions = """You are a research summarizer. Provide JSON: {"experience": "concise summary of key architectural insights and actionable takeaways"}"""
-                    model_identity = "You are a research summarizer. Provide concise summaries."
+                    developer_instructions = """You are a research summarizer. CRITICAL: You MUST provide ONLY JSON output in this exact format: {"experience": "concise summary of key architectural insights and actionable takeaways"}. DO NOT provide any other JSON structure or nested objects. The response must contain ONLY the experience field as a string."""
+                    model_identity = "You are a research summarizer. Provide JSON output with ONLY experience field."
                 else:
                     developer_instructions = "Provide JSON output in the required format."
                     model_identity = "You are a JSON-only output system. Provide JSON output."
@@ -1494,23 +1575,24 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
                 model_identity = "You are a sophisticated AI assistant specialized in neural architecture analysis and evolution."
             
             # Determine primary agent type for tools and response cleaning
+            # Check code_checker before planner since it's more specific
             primary_agent_type = None
-            if is_planner_task:
-                primary_agent_type = "planner"
-            elif is_analyzer_task:
-                primary_agent_type = "analyzer" 
-            elif is_deduplication_task:
-                primary_agent_type = "deduplication"
+            if is_code_checker_task:
+                primary_agent_type = "code_checker"
             elif is_motivation_checker_task:
                 primary_agent_type = "motivation_checker"
-            elif is_code_checker_task:
-                primary_agent_type = "code_checker"
-            elif is_trainer_task:
-                primary_agent_type = "trainer"
+            elif is_deduplication_task:
+                primary_agent_type = "deduplication"
             elif is_debugger_task:
                 primary_agent_type = "debugger"
+            elif is_trainer_task:
+                primary_agent_type = "trainer"
+            elif is_analyzer_task:
+                primary_agent_type = "analyzer" 
             elif is_summarizer_task:
                 primary_agent_type = "summarizer"
+            elif is_planner_task:
+                primary_agent_type = "planner"
             
             # Set agent_type for later use
             agent_type = primary_agent_type
@@ -2235,6 +2317,40 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
                                 if Config.DEBUG_HARMONY_ENCODING:
                                     logger.debug(f"✅ Found summarizer JSON with correct schema: {json_str[:100]}...")
                                 return json_str
+                        
+                        # SUMMARIZER FALLBACK: If model returns complex JSON, convert to simple experience format
+                        for json_str, parsed in valid_jsons:
+                            if isinstance(parsed, dict):
+                                # Try to extract meaningful content from complex JSON
+                                experience_content = ""
+                                
+                                # Look for any performance or analysis content
+                                if "performance_analysis" in parsed:
+                                    perf = parsed["performance_analysis"]
+                                    if isinstance(perf, dict):
+                                        strengths = perf.get("strengths", [])
+                                        weaknesses = perf.get("weaknesses", [])
+                                        if strengths or weaknesses:
+                                            experience_content = f"Performance: {', '.join(strengths[:2])}. Limitations: {', '.join(weaknesses[:2])}"
+                                
+                                # Or look for any summary-like fields
+                                for key in ["summary", "analysis", "insights", "conclusion", "results"]:
+                                    if key in parsed and isinstance(parsed[key], str):
+                                        experience_content = parsed[key][:500]  # Limit length
+                                        break
+                                
+                                # Or use first string value found
+                                if not experience_content:
+                                    for value in parsed.values():
+                                        if isinstance(value, str) and len(value) > 10:
+                                            experience_content = value[:500]
+                                            break
+                                
+                                if experience_content:
+                                    corrected_json = json.dumps({"experience": experience_content})
+                                    if Config.DEBUG_HARMONY_ENCODING:
+                                        logger.warning(f"🔧 SUMMARIZER FALLBACK: Converted complex JSON to experience format: {corrected_json[:100]}...")
+                                    return corrected_json
                     elif agent_type == "trainer" or agent_type == "code_checker":
                         # Look for JSON with success+error schema
                         for json_str, parsed in valid_jsons:
