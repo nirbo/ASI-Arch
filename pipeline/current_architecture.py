@@ -1,110 +1,108 @@
+# delta_net.py
+"""DeltaNet Architecture
+
+A lightweight, hybrid linear attention + hierarchical reasoning model.
+Designed to achieve O(N log N) complexity while supporting arbitrary batch size.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-# -----------------------------------------------------------------------------
-# Linear Attention module (O(N) complexity) using kernel trick
-# -----------------------------------------------------------------------------
+# ----- Linear Attention Module -----
 class LinearAttention(nn.Module):
-    """Efficient linear attention using a positive kernel.
-    Implements the formulation from "Transformers are RNNs, but RNNs are
-    not Transformers" and related work.  The attention is computed as:
-
-    
-    q_k = phi(q)  # (B, S, D)
-    k_k = phi(k)  # (B, S, D)
-    sum_k = k_k.sum(dim=1)  # (B, D)
-    KV = torch.einsum('bld,bmd->bld', k_k, v)  # (B, D, D)
-    out = torch.einsum('bld,bld->bld', q_k, KV / sum_k.unsqueeze(-1))
+    """Linear attention using kernel trick for O(Nd) complexity.
+    Implements the formulation from Reformer and Linear Transformers.
     """
-
-    def __init__(self, dim, kernel_fn=None, eps=1e-6):
+    def __init__(self, dim, heads=4, dim_head=32, kernel_fn=F.elu):
         super().__init__()
-        self.dim = dim
-        # Default kernel: ReLU+1 (non‑negative, easy to compute)
-        self.kernel_fn = kernel_fn or (lambda x: F.relu(x) + 1.0)
-        self.eps = eps
-
-    def forward(self, q, k, v):
-        # q, k, v: (B, S, D)
-        qk = self.kernel_fn(q)  # (B, S, D)
-        kk = self.kernel_fn(k)  # (B, S, D)
-        # Sum over sequence dimension
-        sum_k = kk.sum(dim=1)  # (B, D)
-        # Compute KV matrix
-        KV = torch.einsum("bld,bmd->bld", kk, v)  # (B, D, D)
-        # Avoid division by zero
-        denom = sum_k.unsqueeze(-1).clamp(min=self.eps)
-        # Compute output: element‑wise multiply and sum over D
-        out = torch.einsum("bld,bld->bld", qk, KV / denom)
-        return out
-
-# -----------------------------------------------------------------------------
-# Simple Hierarchical Reasoning Module (HRM)
-# -----------------------------------------------------------------------------
-class HierarchicalReasoning(nn.Module):
-    """A lightweight hierarchical reasoning block.
-    It consists of two linear attention layers stacked with
-    a feed‑forward network.  The depth is intentionally small
-    to keep the overall complexity linear.
-    """
-
-    def __init__(self, dim, hidden_dim=None):
-        super().__init__()
-        hidden_dim = hidden_dim or dim
-        self.attn1 = LinearAttention(dim)
-        self.attn2 = LinearAttention(dim)
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, dim),
-        )
-        self.norm1 = nn.LayerNorm(dim)
-        self.norm2 = nn.LayerNorm(dim)
-        self.norm3 = nn.LayerNorm(dim)
+        self.heads = heads
+        self.dim_head = dim_head
+        inner_dim = dim_head * heads
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
+        self.kernel_fn = kernel_fn
+        self.out_proj = nn.Linear(inner_dim, dim)
 
     def forward(self, x):
-        # x: (B, S, D)
-        # First attention block with residual
-        att1 = self.attn1(x, x, x)
-        x = self.norm1(x + att1)
-        # Second attention block
-        att2 = self.attn2(x, x, x)
-        x = self.norm2(x + att2)
-        # Feed‑forward with residual
-        ff = self.ffn(x)
-        x = self.norm3(x + ff)
-        return x
+        B, L, C = x.shape
+        qkv = self.to_qkv(x)  # (B, L, 3*heads*dim_head)
+        qkv = rearrange(qkv, "b l (q k v) h d -> (q k v) b h l d", q=3, k=1, v=1, h=self.heads, d=self.dim_head)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # each: (B, heads, L, dim_head)
 
-# -----------------------------------------------------------------------------
-# DeltaNet architecture integrating Linear Attention and HRM
-# -----------------------------------------------------------------------------
-class DeltaNet(nn.Module):
-    """DeltaNet – breakthrough hybrid architecture.
-    Combines per‑token linear attention (fast, O(N)) with a
-    lightweight hierarchical reasoning module.  The two streams
-    are fused by concatenation followed by a linear projection.
+        # Apply kernel function
+        q = self.kernel_fn(q + 1e-6)  # avoid negative values
+        k = self.kernel_fn(k + 1e-6)
+
+        # Compute KV^T and QK^T * V efficiently
+        kv = torch.einsum("b h l d, b h l e -> b h d e", k, v)  # (B, heads, dim_head, dim_head)
+        z = torch.inverse(torch.einsum("b h l d, b h l e -> b h d e", k, torch.ones_like(v)))  # normalization
+        out = torch.einsum("b h l d, b h d e -> b h l e", q, kv) * z
+        out = rearrange(out, "b h l d -> b l (h d)")
+        return self.out_proj(out)
+
+# ----- Hierarchical Reasoning Module -----
+class HierarchicalReasoning(nn.Module):
+    """Simple two-level hierarchical reasoning.
+    First level: local linear attention over token groups.
+    Second level: linear attention over group representations.
     """
-
-    def __init__(self, dim, hidden_dim=None, proj_dim=None):
+    def __init__(self, dim, group_size=16, heads=4, dim_head=32):
         super().__init__()
-        hidden_dim = hidden_dim or dim
-        proj_dim = proj_dim or dim
-        self.linear_attn = LinearAttention(dim)
-        self.hrm = HierarchicalReasoning(dim, hidden_dim)
-        self.proj = nn.Linear(2 * dim, proj_dim)
+        self.group_size = group_size
+        self.local_attn = LinearAttention(dim, heads=heads, dim_head=dim_head)
+        self.global_attn = LinearAttention(dim, heads=heads, dim_head=dim_head)
+
+    def forward(self, x):
+        B, L, C = x.shape
+        # Pad to multiple of group_size
+        pad_len = (self.group_size - L % self.group_size) % self.group_size
+        if pad_len > 0:
+            pad = torch.zeros(B, pad_len, C, device=x.device, dtype=x.dtype)
+            x_padded = torch.cat([x, pad], dim=1)
+        else:
+            x_padded = x
+        Lp = x_padded.shape[1]
+        G = Lp // self.group_size
+        # Reshape into groups
+        groups = rearrange(x_padded, "b (g s) c -> b g s c", g=G, s=self.group_size)
+        # Local attention per group
+        local_out = self.local_attn(groups)  # (B, G, group_size, C)
+        # Aggregate group representations (mean over tokens)
+        group_repr = local_out.mean(dim=2)  # (B, G, C)
+        # Global attention over groups
+        global_out = self.global_attn(group_repr)  # (B, G, C)
+        # Expand back to tokens
+        expanded = rearrange(global_out, "b g c -> b g 1 c")
+        expanded = expanded.repeat_interleave(self.group_size, dim=2)
+        expanded = expanded[:, :, :L, :]
+        # Residual connection with original
+        return x + expanded
+
+# ----- DeltaNet -----
+class DeltaNet(nn.Module):
+    """DeltaNet combines linear attention and hierarchical reasoning.
+    Supports arbitrary batch size and achieves O(N log N) complexity.
+    """
+    def __init__(self, dim, heads=4, dim_head=32, group_size=16, **kwargs):
+        super().__init__()
+        self.linear_attn = LinearAttention(dim, heads=heads, dim_head=dim_head)
+        self.hrm = HierarchicalReasoning(dim, group_size=group_size, heads=heads, dim_head=dim_head)
+        self.norm = nn.LayerNorm(dim)
+        self.ff = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.GELU(),
+            nn.Linear(dim * 4, dim),
+        )
 
     def forward(self, x, **kwargs):
-        # x: (B, S, D)
-        # Linear attention stream
-        la_out = self.linear_attn(x, x, x)
-        # Hierarchical reasoning stream
-        hr_out = self.hrm(x)
-        # Fusion by concatenation
-        fused = torch.cat([la_out, hr_out], dim=-1)  # (B, S, 2D)
-        out = self.proj(fused)  # (B, S, proj_dim)
-        return out
+        # x: (B, L, C)
+        attn_out = self.linear_attn(x)
+        hrm_out = self.hrm(x)
+        fused = attn_out + hrm_out
+        fused = self.norm(fused)
+        ff_out = self.ff(fused)
+        return ff_out + fused
 
-# Alias for training utilities that expect a `Model` class name
+# Alias for training scripts
 Model = DeltaNet
