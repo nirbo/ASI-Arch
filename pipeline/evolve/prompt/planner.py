@@ -11,7 +11,7 @@ Implement breakthrough DeltaNet architecture using write_code_file tool.
 
 ## REQUIREMENTS
 - Class: DeltaNet(torch.nn.Module) with __init__(**kwargs) and forward(x, **kwargs)
-- Alias: Model = DeltaNet
+- MANDATORY: End with "Model = DeltaNet" alias for training compatibility
 - Use einops.rearrange() (never .view/.reshape)
 - O(N log N) complexity or better
 - Support any batch size

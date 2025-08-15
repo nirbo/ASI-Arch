@@ -31,15 +31,15 @@ class Config:
     DATABASE: str = "http://localhost:8001"
     
     # Local Model
-    OPENAI_API_KEY: str = "dummy"
-    OPENAI_BASE_URL: str = "http://localhost:8080/v1"  # llama.cpp server
-    OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    # OPENAI_API_KEY: str = "dummy"
+    # OPENAI_BASE_URL: str = "http://localhost:8080/v1"  # llama.cpp server
+    # OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
     # Openrouter
     # API key will be read from environment variable OPENAI_API_KEY, with fallback to hardcoded value
-    # OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy-key-set-OPENAI_API_KEY-environment-variable")
-    # OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
-    # OPENAI_MODEL: str = "z-ai/glm-4.5"  # Switched from gpt-oss-20b for better structured output compatibility
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy-key-set-OPENAI_API_KEY-environment-variable")
+    OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
+    OPENAI_MODEL: str = "openai/gpt-oss-20B"  # Switched from gpt-oss-20b for better structured output compatibility
     
     # Model Prefixes Configuration
     # List of model prefixes that should be handled by any provider
@@ -53,6 +53,7 @@ class Config:
     
     # Model Adapter Configuration
     # Set to True to force Harmony adapter for gpt-oss models
+    # Note: 20B model struggles with harmony tool calling, 120B+ works better
     FORCE_HARMONY_MODE: bool | None = True  # Force harmony for gpt-oss models - they work better with harmony encoding
     
     # Harmony Configuration (for gpt-oss models)
