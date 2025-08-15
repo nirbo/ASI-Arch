@@ -1094,11 +1094,11 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 logger.info(f"🔧 LOCAL HARMONY: api_key = {kwargs.get('api_key', Config.OPENAI_API_KEY)}")
                 
                 # DEBUG: Show exactly what messages are being sent to harmony
-                logger.info(f"🔧 MESSAGES TO HARMONY: {len(messages)} messages")
-                for i, msg in enumerate(messages):
-                    role = msg.get('role', 'unknown')
-                    content_preview = str(msg.get('content', ''))[:100] + '...' if len(str(msg.get('content', ''))) > 100 else str(msg.get('content', ''))
-                    logger.info(f"  Message {i+1}: {role} - {content_preview}")
+                # logger.info(f"🔧 MESSAGES TO HARMONY: {len(messages)} messages")
+                # for i, msg in enumerate(messages):
+                #     role = msg.get('role', 'unknown')
+                #     content_preview = str(msg.get('content', ''))[:100] + '...' if len(str(msg.get('content', ''))) > 100 else str(msg.get('content', ''))
+                #     logger.info(f"  Message {i+1}: {role} - {content_preview}")
                 
             # Simple harmony encoding using Config values with agent-specific tool calling instructions
             if agent_type == 'planner':
@@ -1166,10 +1166,10 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 logger.info(f"🔧 LOCAL HARMONY: Final encoded length = {len(encoded_text)}")
                 
                 # DEBUG: Print the ENTIRE harmony-encoded payload
-                logger.info(f"🔧 FULL HARMONY PAYLOAD:")
-                logger.info(f"{'='*50} START HARMONY PAYLOAD {'='*50}")
-                logger.info(encoded_text)
-                logger.info(f"{'='*50} END HARMONY PAYLOAD {'='*50}")
+                # logger.info(f"🔧 FULL HARMONY PAYLOAD:")
+                # logger.info(f"{'='*50} START HARMONY PAYLOAD {'='*50}")
+                # logger.info(encoded_text)
+                # logger.info(f"{'='*50} END HARMONY PAYLOAD {'='*50}")
                 
             # Simple completion call using Config values
             client = openai.AsyncOpenAI(
@@ -1194,8 +1194,8 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 if hasattr(response, 'choices') and response.choices:
                     raw_content = response.choices[0].text if hasattr(response.choices[0], 'text') else str(response.choices[0])
                     logger.info(f"🔧 RAW MODEL RESPONSE: Length = {len(raw_content)}")
-                    logger.info(f"🔧 RAW MODEL RESPONSE: First 500 chars = {raw_content[:500]}")
-                    logger.info(f"🔧 RAW MODEL RESPONSE: Last 500 chars = {raw_content[-500:]}")
+                    # logger.info(f"🔧 RAW MODEL RESPONSE: First 500 chars = {raw_content[:500]}")
+                    # logger.info(f"🔧 RAW MODEL RESPONSE: Last 500 chars = {raw_content[-500:]}")
                     
                     # Look for harmony tokens to understand format
                     harmony_tokens = ['<|start|>', '<|channel|>', '<|message|>', '<|end|>', '<|return|>', '<|call|>']
