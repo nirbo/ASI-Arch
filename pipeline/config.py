@@ -61,7 +61,7 @@ class Config:
     HARMONY_MAX_TOKENS: int = 43000  # Max tokens for experiment responses 
     
     # Harmony reasoning effort level - controls model's reasoning depth
-    HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
+    HARMONY_REASONING_EFFORT: str = "medium"  # Options: "low", "medium", "high"
     
     # Embedding Model Configuration
     EMBEDDING_MODEL: str = "doubao-embedding-large-text-240915"  # Embedding model for vector search
@@ -71,18 +71,18 @@ class Config:
     # Higher values allow more complex reasoning but take longer to complete
     
     # Evolution agents (most complex architectural tasks)
-    MAX_TURNS_PLANNER: int = 5          # Architecture design and innovation
-    MAX_TURNS_DEDUPLICATION: int = 5    # Analysis and differentiation from existing work
-    MAX_TURNS_MOTIVATION_CHECKER: int = 5  # Motivation comparison and uniqueness validation
-    MAX_TURNS_CODE_CHECKER: int = 5    # Code validation and correctness checking (already set)
+    MAX_TURNS_PLANNER: int = 15          # Architecture design and innovation
+    MAX_TURNS_DEDUPLICATION: int = 15    # Analysis and differentiation from existing work
+    MAX_TURNS_MOTIVATION_CHECKER: int = 15  # Motivation comparison and uniqueness validation
+    MAX_TURNS_CODE_CHECKER: int = 15    # Code validation and correctness checking (already set)
     
     # Analysis agents
-    MAX_TURNS_ANALYZER: int = 5          # Comprehensive result analysis and interpretation
-    MAX_TURNS_SUMMARIZER: int = 5        # Reduced to quickly test tool-call conversion fix
+    MAX_TURNS_ANALYZER: int = 15          # Comprehensive result analysis and interpretation
+    MAX_TURNS_SUMMARIZER: int = 15        # Reduced to quickly test tool-call conversion fix
     
     # Training and debugging agents
-    MAX_TURNS_TRAINER: int = 5          # Training script execution and monitoring
-    MAX_TURNS_DEBUGGER: int = 5         # Error analysis and code fixing
+    MAX_TURNS_TRAINER: int = 15          # Training script execution and monitoring
+    MAX_TURNS_DEBUGGER: int = 15         # Error analysis and code fixing
 
     RETRY_INTERVAL: int = 5
     
@@ -90,4 +90,4 @@ class Config:
     # Debug Configuration
     DEBUG_AGENT_TURNS: bool = True  # Enable/disable detailed agent turn debugging
     DEBUG_HARMONY_ENCODING: bool = False  # Enable/disable harmony encoding debugging
-    DEBUG_RESPONSE_CONTENT: bool = True  # Enable/disable response content debugging
+    DEBUG_RESPONSE_CONTENT: bool = False  # Enable/disable response content debugging
