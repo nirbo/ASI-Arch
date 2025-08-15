@@ -1349,12 +1349,10 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
                     model_identity = "You are a debugging expert. Provide JSON output."
                 elif is_summarizer_task:
                     developer_instructions = """You are a research summarizer. Provide JSON: {"experience": "concise summary of key architectural insights and actionable takeaways"}"""
-                else:
-                    developer_instructions = "Provide JSON output in the required format."
                     model_identity = "You are a research summarizer. Provide concise summaries."
                 else:
-                    developer_instructions = "CRITICAL: You MUST respond with ONLY valid JSON. NO explanatory text. NO conversational responses. NO markdown. ONLY the JSON object matching the required schema."
-                    model_identity = "You are a JSON-only output system. You respond exclusively with valid JSON objects that match the required schema. You never provide explanatory text or conversational responses."
+                    developer_instructions = "Provide JSON output in the required format."
+                    model_identity = "You are a JSON-only output system. Provide JSON output."
             else:
                 developer_instructions = None
                 model_identity = "You are a sophisticated AI assistant specialized in neural architecture analysis and evolution."
