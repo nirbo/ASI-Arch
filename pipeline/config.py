@@ -60,7 +60,7 @@ class Config:
     HARMONY_MAX_TOKENS: int = 43000  # Max tokens for experiment responses 
     
     # Harmony reasoning effort level - controls model's reasoning depth
-    HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
+    HARMONY_REASONING_EFFORT: str = "medium"  # Options: "low", "medium", "high"
     
     # Embedding Model Configuration
     EMBEDDING_MODEL: str = "doubao-embedding-large-text-240915"  # Embedding model for vector search
