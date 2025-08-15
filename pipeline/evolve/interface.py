@@ -2,7 +2,7 @@ from .prompt import Planner_input, Motivation_checker_input, Deduplication_input
 from .model import planner, motivation_checker, deduplication, code_checker
 from agents import exceptions, set_tracing_disabled
 from typing import List, Tuple
-from ..config import Config
+from config import Config
 from ..database.mongo_database import create_client
 from ..utils.agent_logger import log_agent_run, log_info, log_warning, log_error
 import re

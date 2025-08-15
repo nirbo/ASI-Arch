@@ -46,9 +46,9 @@ async def lifespan(app: FastAPI):
             logger.info("Database connection closed")
         except Exception as e:
             logger.error(f"Failed to close connection: {e}")
-# Create FastAPI application
+# Create FastAPI application with increased body size limits
 app = FastAPI(
-    title="MongoDB Database API",
+    title="MongoDB Database API", 
     description="Provides HTTP interfaces to operate on a MongoDB database",
     version="1.0.0",
     docs_url="/docs",
@@ -63,6 +63,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Configure request body size limit to handle large experimental data
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+import json
+
+class LargeBodyMiddleware(BaseHTTPMiddleware):
+    """Middleware to handle large request bodies for experimental data"""
+    async def dispatch(self, request: Request, call_next):
+        # Allow large bodies for POST requests to /elements
+        if request.method == "POST" and request.url.path == "/elements":
+            # Override default size limit for this endpoint
+            request.scope["body_size_limit"] = 100 * 1024 * 1024  # 100MB
+        return await call_next(request)
+
+app.add_middleware(LargeBodyMiddleware)
 # Pydantic model definitions
 class DataElementRequest(BaseModel):
     """Request model for adding data elements"""
@@ -1390,5 +1407,12 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8001,  # Changed to port 8001
         reload=True,
-        log_level="info"
+        log_level="info",
+        # Increase request body size limits for large experimental data
+        limit_max_requests=1000,
+        limit_concurrency=100,
+        # Set body size to 100MB to handle large cognition/analysis data
+        # (FastAPI default is 16MB which is too small for research data)
+        timeout_keep_alive=120,
+        access_log=True
     )

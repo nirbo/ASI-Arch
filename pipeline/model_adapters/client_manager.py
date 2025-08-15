@@ -298,7 +298,7 @@ class ChatCompletionsManager:
         temperature: Optional[float] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
-        stream: bool = False,
+        stream: bool = True,
         **kwargs: Any
     ) -> Union[ChatCompletion, AsyncIterator[ChatCompletionChunk]]:
         """

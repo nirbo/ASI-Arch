@@ -45,7 +45,7 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
         original_create = self.chat.completions.create
         
         async def harmony_aware_create(**create_kwargs):
-            from pipeline.config import Config
+            from config import Config
             model = create_kwargs.get('model', '')
             
             # Extract custom parameters that shouldn't be passed to OpenAI
@@ -80,7 +80,7 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 should_use_harmony = self._should_use_harmony(model, strategy)
                 
                 if should_use_harmony and self._check_unsloth_available():
-                    from pipeline.config import Config
+                    from config import Config
                     force_mode_info = f" (FORCE_HARMONY_MODE={Config.FORCE_HARMONY_MODE})" if hasattr(Config, 'FORCE_HARMONY_MODE') and Config.FORCE_HARMONY_MODE is not None else ""
                     logger.info(f"HARMONY: Using harmony encoding for {model} (strategy: {strategy}{force_mode_info})")
                     try:
@@ -145,7 +145,7 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                     self._add_agents_compatibility(result)
                     
                     # Debug response content if enabled
-                    from pipeline.config import Config
+                    from config import Config
                     if getattr(Config, 'DEBUG_RESPONSE_CONTENT', False):
                         try:
                             if hasattr(result, 'choices') and result.choices:
@@ -286,7 +286,7 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
     
     def _should_use_harmony(self, model: str, strategy: str) -> bool:
         """Determine if harmony encoding should be used based on strategy."""
-        from pipeline.config import Config
+        from config import Config
         
         # Check FORCE_HARMONY_MODE first - it overrides strategy
         if hasattr(Config, 'FORCE_HARMONY_MODE') and Config.FORCE_HARMONY_MODE is True:
@@ -605,7 +605,7 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
         """Format response content based on agent type for both harmony and standard paths."""
         import json
         import re
-        from pipeline.config import Config
+        from config import Config
         
         # Debug logging to trace content processing
         logger.debug(f"🔧 FORMATTING: Processing {agent_type} response")
@@ -748,6 +748,21 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
             model=getattr(completion_response, 'model', 'gpt-oss-20b'),
             object="chat.completion"
         )
+        
+        # CRITICAL FIX: Add messages attribute for agents library compatibility  
+        # The agents library expects result.messages, but ChatCompletion has choices
+        # We add a messages attribute that points to the choice messages for compatibility
+        if hasattr(completion, 'choices') and completion.choices:
+            # Create a messages list that agents library can access
+            completion.messages = [choice.message for choice in completion.choices]
+            logger.debug(f"🔧 AGENTS COMPATIBILITY: Added messages attribute with {len(completion.messages)} messages")
+            if completion.messages:
+                logger.debug(f"   Message 0 content exists: {completion.messages[0].content is not None}")
+                logger.debug(f"   Message 0 content preview: {completion.messages[0].content[:100] if completion.messages[0].content else 'None'}...")
+        else:
+            # Ensure messages attribute always exists, even if empty
+            completion.messages = []
+            logger.debug(f"🔧 AGENTS COMPATIBILITY: No choices found, created empty messages list")
         
         logger.debug(f"✅ HARMONY CONVERSION: Created ChatCompletion with {len(completion.choices)} choices")
         return completion
@@ -1168,8 +1183,109 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                     "judgement_reason": "Empty response received from motivation checker"
                 })
         
-        if not content:
-            return content
+        # Handle empty content for all agent types
+        if not content or not content.strip():
+            if agent_type == "summarizer":
+                logger.warning(f"🔧 SUMMARIZER: Empty response, returning fallback")
+                return json.dumps({
+                    "experience": "No analysis available - model returned empty response"
+                })
+            elif agent_type == "planner":
+                logger.warning(f"🔧 PLANNER: Empty response, returning fallback")
+                return json.dumps({
+                    "name": "empty_response",
+                    "motivation": "Model returned empty response",
+                    "code": "# No code generated"
+                })
+            elif agent_type == "analyzer":
+                return json.dumps({
+                    "design_evaluation": "Empty response",
+                    "experimental_results_analysis": "Empty response",
+                    "expectation_vs_reality_comparison": "Empty response",
+                    "theoretical_explanation_with_evidence": "Empty response",
+                    "synthesis_and_insights": "Empty response"
+                })
+            elif agent_type in ["trainer", "code_checker"]:
+                return json.dumps({
+                    "success": False,
+                    "error": "Empty response from model"
+                })
+            elif agent_type == "debugger":
+                return json.dumps({
+                    "changes_made": "No changes - empty response"
+                })
+            elif agent_type == "deduplication":
+                return json.dumps({
+                    "name": "empty_deduplication",
+                    "motivation": "Empty response from model",
+                    "code": ""
+                })
+            else:
+                # For unknown agent types, return empty content
+                return content
+        
+        # Handle truncated summarizer responses before motivation_checker processing
+        if agent_type == "summarizer" and content and content.strip():
+            # Check if this looks like a truncated harmony response (reasoning chain ending abruptly)
+            if ("analysis" in content.lower() and 
+                ("The final" in content or "final json" in content.lower() or 
+                 content.rstrip().endswith(("The final", "final", "json", "{", '"')) or
+                 "}" not in content)):
+                
+                logger.warning(f"🔧 SUMMARIZER: Detected truncated harmony response, extracting insights")
+                
+                # Try to extract useful content from the reasoning chain
+                import re
+                
+                # Look for any mentions of metrics, performance, or insights
+                content_lower = content.lower()
+                
+                # Extract training loss improvements
+                loss_match = re.search(r'training loss.*?(\d+\.?\d*)\s*to\s*(\d+\.?\d*)', content, re.IGNORECASE)
+                if loss_match:
+                    loss_start, loss_end = loss_match.groups()
+                    loss_improvement = f"Training loss improved from {loss_start} to {loss_end}"
+                else:
+                    loss_improvement = ""
+                
+                # Extract accuracy information
+                accuracy_match = re.search(r'accuracy.*?(\d+)%', content, re.IGNORECASE)
+                if accuracy_match:
+                    accuracy = accuracy_match.group(1)
+                    accuracy_info = f"Achieved {accuracy}% accuracy"
+                else:
+                    accuracy_info = ""
+                
+                # Extract innovation mentions
+                innovation_match = re.search(r'(attention mechanisms?|transformer|innovation|key.*?innovation).*?([^.]{10,50})', content, re.IGNORECASE)
+                if innovation_match:
+                    innovation_info = f"Key innovation: {innovation_match.group(0)[:80]}"
+                else:
+                    innovation_info = ""
+                
+                # Combine extracted insights
+                insights = []
+                if loss_improvement:
+                    insights.append(loss_improvement)
+                if accuracy_info:
+                    insights.append(accuracy_info)
+                if innovation_info:
+                    insights.append(innovation_info)
+                
+                if insights:
+                    experience_text = ". ".join(insights) + ". Model response was truncated during generation."
+                else:
+                    # Fallback: extract first meaningful sentences
+                    sentences = re.split(r'[.!?]+', content)
+                    meaningful = [s.strip() for s in sentences if len(s.strip()) > 20 and any(keyword in s.lower() for keyword in ['training', 'loss', 'accuracy', 'performance', 'result', 'achieved'])]
+                    if meaningful:
+                        experience_text = meaningful[0][:200] + ". Model response was truncated during generation."
+                    else:
+                        experience_text = "Model provided analysis but response was truncated before completion. Key insights could not be fully extracted."
+                
+                return json.dumps({
+                    "experience": experience_text
+                })
         
         # Continue motivation_checker handling for non-empty content
         if agent_type == "motivation_checker":
@@ -1185,7 +1301,8 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                     # Look for JSON within the response content
                     # Pattern: "assistantfinal json{...}"
                     import re
-                    json_match = re.search(r'assistantfinal json(\{.*\})', inner_content, re.DOTALL)
+                    # Try to find complete JSON first
+                    json_match = re.search(r'assistantfinal json(\{.*)', inner_content, re.DOTALL | re.IGNORECASE)
                     if json_match:
                         potential_json = json_match.group(1)
                         try:
@@ -1261,8 +1378,9 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 try:
                     parsed = json.loads(content_clean)
                     if isinstance(parsed, dict):
-                        # If it contains 'experience' field (wrong format), extract content
-                        if "experience" in parsed:
+                        # If it contains 'experience' field (wrong format FOR PLANNER), extract content
+                        # BUT ONLY for planner - summarizer legitimately uses experience field!
+                        if "experience" in parsed and agent_type == "planner":
                             experience_content = parsed["experience"]
                             logger.warning(f"🔧 PLANNER: Converting wrong JSON format to planner format")
                             
@@ -1443,7 +1561,7 @@ Model = DeltaNet
     async def _chat_completions_create_harmony_local(self, **kwargs):
         """Simplified harmony encoding for local models using unsloth_zoo directly."""
         from unsloth_zoo import encode_conversations_with_harmony
-        from pipeline.config import Config
+        from config import Config
         import openai
         
         try:
@@ -1554,7 +1672,8 @@ Model = DeltaNet
                 model=model,
                 prompt=encoded_text,
                 max_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
+                stop=[]  # Disable default stop sequences to prevent harmony format early stopping
             )
             
             if Config.DEBUG_HARMONY_ENCODING:
@@ -1590,7 +1709,7 @@ Model = DeltaNet
         """Create completion using unsloth harmony encoding."""
         try:
             from unsloth_zoo import encode_conversations_with_harmony
-            from pipeline.config import Config
+            from config import Config
             from pipeline.utils.harmony_json_sanitizer import sanitize_harmony_parameters
             
             # Check if this is a local model that should use simplified approach
@@ -1927,7 +2046,7 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
                 formatted_conversation = encoding_result
                 
             # Conditional debug logging
-            from pipeline.config import Config
+            from config import Config
             if Config.DEBUG_HARMONY_ENCODING:
                 logger.info(f"HARMONY ENCODING: Using harmony encoding for model {model}, JSON task: {is_json_task}, max_tokens: {max_tokens}")
                 logger.debug(f"Harmony conversation length: {len(formatted_conversation)} characters")
@@ -2308,7 +2427,7 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
             
             # Check for harmony channel tokens
             if '<|channel|>' in cleaned:
-                from pipeline.config import Config
+                from config import Config
                 
                 # Extract final channel content first (highest priority)
                 final_patterns = [
@@ -2378,7 +2497,7 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
                 
                 # If no final channel but this is a JSON task, try to extract JSON from anywhere
                 if is_json_task:
-                    from pipeline.config import Config
+                    from config import Config
                     
                     # Find all JSON objects in the response with enhanced patterns
                     json_patterns = [
@@ -2708,7 +2827,7 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
     def _normalize_tool_args(self, args_str: str) -> str:
         """Normalize tool arguments with comprehensive validation and JSON fixing."""
         import json
-        from pipeline.config import Config
+        from config import Config
         
         if not args_str:
             return '{}'
@@ -2822,7 +2941,7 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
             (r'<tool_call[^>]*>([^<]+)</tool_call>', None, lambda m: m.group(1))  # Extract function name dynamically
         ]
         
-        from pipeline.config import Config
+        from config import Config
         if Config.DEBUG_HARMONY_ENCODING:
             logger.debug(f"🔧 TOOL EXTRACTION: Checking full_response for tool calls: {full_response[:200]}...")
             logger.debug(f"🔧 TOOL EXTRACTION: Full response length: {len(full_response)} chars")
@@ -2977,7 +3096,7 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
         )
         
         # Debug logging for ChatCompletion object structure
-        from pipeline.config import Config
+        from config import Config
         if Config.DEBUG_HARMONY_ENCODING:
             logger.debug(f"🔧 CHATCOMPLETION DEBUG: Creating ChatCompletion object")
             logger.debug(f"   Choice type: {type(choice)}")
@@ -3125,7 +3244,7 @@ def patch_agents_multi_provider():
     """
     # Import Config here to avoid circular imports
     try:
-        from pipeline.config import Config
+        from config import Config
         api_key = Config.OPENAI_API_KEY
         base_url = Config.OPENAI_BASE_URL
         common_prefixes = Config.MODEL_PREFIXES

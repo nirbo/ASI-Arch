@@ -114,7 +114,7 @@ def configure_flexible_provider_from_config():
     the configured OpenRouter settings.
     """
     try:
-        from pipeline.config import Config
+        from config import Config
         
         return get_flexible_provider(
             api_key=Config.OPENAI_API_KEY,

@@ -27,7 +27,7 @@ from agents import set_default_openai_api, set_default_openai_client, set_tracin
 from openai import AsyncOpenAI
 
 from pipeline.analyse import analyse
-from pipeline.config import Config
+from config import Config
 from pipeline.database import program_sample, update
 from pipeline.eval import evaluation
 from pipeline.evolve import evolve

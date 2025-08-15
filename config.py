@@ -53,15 +53,14 @@ class Config:
     
     # Model Adapter Configuration
     # Set to True to force Harmony adapter for gpt-oss models
-    # Note: 20B model struggles with harmony tool calling, 120B+ works better
     FORCE_HARMONY_MODE: bool | None = True  # Force harmony for gpt-oss models - they work better with harmony encoding
     
     # Harmony Configuration (for gpt-oss models)
     # Max tokens for harmony model completions - needs to be high for academic reasoning chains
-    HARMONY_MAX_TOKENS: int = 43000  # Max tokens for experiment responses 
+    HARMONY_MAX_TOKENS: int = 65536  # Max tokens for experiment responses 
     
     # Harmony reasoning effort level - controls model's reasoning depth
-    HARMONY_REASONING_EFFORT: str = "medium"  # Options: "low", "medium", "high"
+    HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"
     
     # Embedding Model Configuration
     EMBEDDING_MODEL: str = "doubao-embedding-large-text-240915"  # Embedding model for vector search
@@ -91,3 +90,4 @@ class Config:
     DEBUG_AGENT_TURNS: bool = True  # Enable/disable detailed agent turn debugging
     DEBUG_HARMONY_ENCODING: bool = False  # Enable/disable harmony encoding debugging
     DEBUG_RESPONSE_CONTENT: bool = False  # Enable/disable response content debugging
+    DEBUG_DATABASE_OPERATIONS: bool = False  # Enable/disable database and analysis debug prints

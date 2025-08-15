@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from ..config import Config
+from config import Config
 from .element import DataElement
 from .mongo_database import create_client
 
@@ -92,11 +92,12 @@ def update(result: DataElement) -> bool:
     """
     # Debug: print the data being sent to help diagnose 500 error
     result_dict = result.to_dict()
-    print(f"DEBUG: Sending data to database API:")
-    print(f"  - name: {result_dict.get('name')}")
-    print(f"  - result keys: {list(result_dict.get('result', {}).keys())}")
-    print(f"  - parent: {result_dict.get('parent')}")
-    print(f"  - result dict size: {len(str(result_dict))}")
+    if Config.DEBUG_DATABASE_OPERATIONS:
+        print(f"DEBUG: Sending data to database API:")
+        print(f"  - name: {result_dict.get('name')}")
+        print(f"  - result keys: {list(result_dict.get('result', {}).keys())}")
+        print(f"  - parent: {result_dict.get('parent')}")
+        print(f"  - result dict size: {len(str(result_dict))}")
     
     try:
         db.add_element_from_dict(result_dict)

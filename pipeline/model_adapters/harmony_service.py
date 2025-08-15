@@ -27,7 +27,7 @@ import json
 
 # Import configuration
 try:
-    from ..config import Config
+    from config import Config
 except ImportError:
     # Handle when running from different contexts
     import sys
@@ -113,7 +113,7 @@ class HarmonyServiceManager:
         # Only log initialization if we actually expect to use harmony services
         # Check if any models in the current configuration might need harmony services
         try:
-            from ..config import Config
+            from config import Config
             if hasattr(Config, 'OPENAI_MODEL') and Config.OPENAI_MODEL:
                 # Import factory here to avoid circular imports
                 from .factory import ModelAdapterFactory

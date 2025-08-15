@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..config import Config
+from config import Config
 from .element import DataElement
 
 # Set up logging

@@ -3,108 +3,80 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-# ----------------------------
-# Linear Attention Layer
-# ----------------------------
+
 class LinearAttention(nn.Module):
-    """Linear Self‑Attention via kernel trick.
-    Complexity: O(N · d) where N is sequence length and d is hidden dim.
+    """Linear attention mechanism based on kernel trick.
+    Computes Q @ (Kᵀ V) which is linear in the sequence length.
     """
-    def __init__(self, dim: int, kernel_dim: int = 64, eps: float = 1e-6):
+    def __init__(self, dim, heads=8, dim_head=64):
         super().__init__()
         self.dim = dim
-        self.eps = eps
-        self.query_proj = nn.Linear(dim, dim, bias=False)
-        self.key_proj   = nn.Linear(dim, dim, bias=False)
-        self.value_proj = nn.Linear(dim, dim, bias=False)
-        self.kernel_dim = kernel_dim
-        # Optional linear projection for kernel
-        self.kernel_proj = nn.Linear(dim, kernel_dim, bias=False)
+        self.heads = heads
+        self.dim_head = dim_head
+        self.scale = dim_head ** -0.5
+        self.proj = nn.Linear(dim, heads * dim_head * 3, bias=True)
+        self.out_proj = nn.Linear(heads * dim_head, dim, bias=True)
 
-    def kernel(self, x: torch.Tensor) -> torch.Tensor:
-        """Non‑negative kernel (ReLU + eps)."""
-        return F.relu(x) + self.eps
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [batch, seq, dim]
-        q = self.query_proj(x)  # [b, n, d]
-        k = self.key_proj(x)    # [b, n, d]
-        v = self.value_proj(x)  # [b, n, d]
-
-        # Apply kernel to queries and keys
-        qk = self.kernel(q)   # [b, n, d]
-        kk = self.kernel(k)   # [b, n, d]
-
-        # Compute K^T V per batch
-        kv = torch.einsum('bnd,bmd->bnd', kk, v)  # [b, d, d]
-        # Compute attention scores and apply to kv
-        attn = torch.einsum('bnd,bnd->bd', qk, kv)  # [b, d]
-        attn = attn.unsqueeze(1)  # [b, 1, d]
-        out = attn  # linear attention output
+    def forward(self, x):
+        # x: (batch, seq, dim)
+        batch, seq, _ = x.size()
+        # Linear projections
+        qkv = self.proj(x)  # (batch, seq, heads*dim_head*3)
+        # Rearrange to separate heads and Q/K/V
+        qkv = rearrange(qkv, 'b s (h d3) -> b h s d3', h=self.heads, d3=3 * self.dim_head)
+        q, k, v = qkv[:, :, :, :self.dim_head], qkv[:, :, :, self.dim_head:2 * self.dim_head], qkv[:, :, :, 2 * self.dim_head:]
+        # Optional: apply activation to ensure positivity if using kernel
+        # Here we keep raw linear projections for simplicity
+        # Compute KV matrix per head
+        kv = torch.matmul(k.transpose(-2, -1), v)  # (batch, heads, dim_head, dim_head)
+        # Compute attention output
+        out = torch.matmul(q, kv)  # (batch, heads, seq, dim_head)
+        out = rearrange(out, 'b h s d -> b s (h d)')  # (batch, seq, heads*dim_head)
+        out = self.out_proj(out)  # (batch, seq, dim)
         return out
 
-# ----------------------------
-# Hierarchical Reasoning Module
-# ----------------------------
-class HierarchicalReasoning(nn.Module):
-    """A shallow Transformer stack to model reasoning steps.
-    Depth is a small constant; each step operates on the same sequence.
+
+class HRM(nn.Module):
+    """Hierarchical Reasoning Module.
+    Performs global pooling, MLP reasoning, and broadcasts back to token level.
     """
-    def __init__(self, dim: int, depth: int = 2, num_heads: int = 4, dim_feedforward: int = 128, dropout: float = 0.1):
+    def __init__(self, dim):
         super().__init__()
-        encoder_layer = nn.TransformerEncoderLayer(d_model=dim, nhead=num_heads, dim_feedforward=dim_feedforward, dropout=dropout, activation='gelu')
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=depth)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [batch, seq, dim]
-        # Transformer expects shape [seq, batch, dim]
-        x_t = rearrange(x, 'b n d -> n b d')
-        out = self.encoder(x_t)
-        out = rearrange(out, 'n b d -> b n d')
-        return out
-
-# ----------------------------
-# Gated Fusion Layer
-# ----------------------------
-class GatedFusion(nn.Module):
-    """Learned gating between linear attention and reasoning outputs."""
-    def __init__(self, dim: int):
-        super().__init__()
-        self.gate_mlp = nn.Sequential(
-            nn.Linear(dim * 2, dim),
-            nn.GELU(),
-            nn.Linear(dim, 1),
-            nn.Sigmoid()
+        self.pool = nn.AdaptiveAvgPool1d(1)  # mean pooling over sequence
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(dim, dim),
         )
 
-    def forward(self, la: torch.Tensor, hr: torch.Tensor) -> torch.Tensor:
-        # la, hr: [batch, seq, dim]
-        combined = torch.cat([la, hr], dim=-1)  # [b, n, 2d]
-        gate = self.gate_mlp(combined)  # [b, n, 1]
-        out = gate * la + (1 - gate) * hr
-        return out
+    def forward(self, x):
+        # x: (batch, seq, dim)
+        # Global context
+        pooled = self.pool(x.transpose(1, 2)).squeeze(-1)  # (batch, dim)
+        # Reasoning MLP
+        reasoning = self.mlp(pooled)  # (batch, dim)
+        # Broadcast to sequence length
+        reasoning = reasoning.unsqueeze(1).repeat(1, x.size(1), 1)  # (batch, seq, dim)
+        return reasoning
 
-# ----------------------------
-# DeltaNet Architecture
-# ----------------------------
+
 class DeltaNet(nn.Module):
-    """Hybrid Linear Attention + Hierarchical Reasoning network."""
-    def __init__(self, dim: int = 128, **kwargs):
+    """DeltaNet combines linear attention and hierarchical reasoning.
+    Architecture: Linear Attention → HRM reasoning → fused output.
+    """
+    def __init__(self, dim, heads=8, dim_head=64):
         super().__init__()
-        self.dim = dim
-        self.linear_attention = LinearAttention(dim=dim)
-        self.hierarchical_reasoning = HierarchicalReasoning(dim=dim)
-        self.fusion = GatedFusion(dim=dim)
+        self.linear_attn = LinearAttention(dim, heads, dim_head)
+        self.hrm = HRM(dim)
+        # Optionally, a final projection can be added
+        self.out_proj = nn.Linear(dim, dim, bias=True)
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        # x: [batch, seq, dim]
-        la = self.linear_attention(x)  # [b, d]
-        # Expand to match seq dimension
-        la = rearrange(la, 'b d -> b 1 d')
-        hr = self.hierarchical_reasoning(x)  # [b, seq, dim]
-        # Broadcast la to seq
-        la = la.repeat(1, hr.size(1), 1)
-        out = self.fusion(la, hr)
+    def forward(self, x, **kwargs):
+        # x: (batch, seq, dim)
+        attn_out = self.linear_attn(x)
+        hrm_out = self.hrm(x)
+        fused = attn_out + hrm_out
+        out = self.out_proj(fused)
         return out
 
 # Alias for training utilities

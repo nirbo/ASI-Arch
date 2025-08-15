@@ -137,7 +137,7 @@ class AgentLogger:
         
         try:
             # Add debugging for max_turns issues (conditional)
-            from pipeline.config import Config
+            from config import Config
             if Config.DEBUG_AGENT_TURNS:
                 max_turns = kwargs.get('max_turns', 'not_specified')
                 self.log_debug(f"Starting agent {agent_name} with max_turns={max_turns}")

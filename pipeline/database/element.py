@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Optional
 
 from config import Config
-from utils.agent_logger import log_agent_run
+from pipeline.utils.agent_logger import log_agent_run
 from .model import summarizer
 from .prompt import Summary_input
 

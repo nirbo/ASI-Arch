@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, Any
 
 from agents import exceptions
-from ..config import Config
+from config import Config
 from ..database import DataElement
 from ..database.mongo_database import create_client
 from ..tools.tools import run_rag
@@ -50,9 +50,10 @@ async def analyse(
     }
     
     # Debug: print result_dict structure
-    print(f"DEBUG ANALYSE: result_dict keys: {list(result_dict.keys())}")
-    print(f"DEBUG ANALYSE: train_result type: {type(train_result)}")
-    print(f"DEBUG ANALYSE: test_result type: {type(test_result)}")
+    if Config.DEBUG_DATABASE_OPERATIONS:
+        print(f"DEBUG ANALYSE: result_dict keys: {list(result_dict.keys())}")
+        print(f"DEBUG ANALYSE: train_result type: {type(train_result)}")
+        print(f"DEBUG ANALYSE: test_result type: {type(test_result)}")
     
     # Use timestamped name for lookup, but replace with original name
     increment(result_dict, name, original_name, 'train')
@@ -210,9 +211,10 @@ def _ref_elements_context(ref_element: DataElement) -> str:
     """Generate context string for a reference element."""
     try:
         # Debug: check the structure of ref_element.result
-        print(f"DEBUG REF_ELEMENT: name={ref_element.name}")
-        print(f"DEBUG REF_ELEMENT: result type={type(ref_element.result)}")
-        print(f"DEBUG REF_ELEMENT: result keys={list(ref_element.result.keys()) if isinstance(ref_element.result, dict) else 'not a dict'}")
+        if Config.DEBUG_DATABASE_OPERATIONS:
+            print(f"DEBUG REF_ELEMENT: name={ref_element.name}")
+            print(f"DEBUG REF_ELEMENT: result type={type(ref_element.result)}")
+            print(f"DEBUG REF_ELEMENT: result keys={list(ref_element.result.keys()) if isinstance(ref_element.result, dict) else 'not a dict'}")
         
         train_data = ref_element.result.get("train", "No training data available")
         test_data = ref_element.result.get("test", "No test data available")

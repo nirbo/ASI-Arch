@@ -151,8 +151,9 @@ class MongoDatabase:
         if not element.cognition or not isinstance(element.cognition, str):
             self.logger.error("Data validation failed: cognition field is empty or of incorrect type")
             return False
-        if not element.log or not isinstance(element.log, str):
-            self.logger.error("Data validation failed: log field is empty or of incorrect type")
+        # Allow empty log field (it's optional and can be empty string)
+        if not isinstance(element.log, str):
+            self.logger.error("Data validation failed: log field has incorrect type (should be a string)")
             return False
         if not element.motivation or not isinstance(element.motivation, str):
             self.logger.error("Data validation failed: motivation field is empty or of incorrect type")
