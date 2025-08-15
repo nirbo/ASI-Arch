@@ -1222,7 +1222,17 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
             })
         
         if content.strip().startswith('{'):
-            return content  # Already JSON or empty for other agents
+            # For summarizer, we need to check if it's the correct schema
+            if agent_type == "summarizer":
+                try:
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and "experience" in parsed:
+                        return content  # Already correct format
+                    # If not correct format, continue to conversion logic below
+                except json.JSONDecodeError:
+                    pass
+            else:
+                return content  # Already JSON or empty for other agents
             
         # Convert to agent-appropriate JSON format
         if agent_type == "planner":
@@ -1247,6 +1257,40 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 "code": content_clean
             })
         elif agent_type == "summarizer":
+            # If content is complex JSON, try to extract experience-worthy content
+            if content.strip().startswith('{'):
+                try:
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict):
+                        # Look for performance_summary or performance_analysis first
+                        for perf_key in ["performance_summary", "performance_analysis"]:
+                            if perf_key in parsed:
+                                perf_data = parsed[perf_key]
+                                if isinstance(perf_data, dict):
+                                    strengths = perf_data.get("strengths", [])
+                                    weaknesses = perf_data.get("weaknesses", [])
+                                    if strengths or weaknesses:
+                                        experience_text = f"Performance insights: {', '.join(strengths[:2])}. Key limitations: {', '.join(weaknesses[:2])}"
+                                        return json.dumps({"experience": experience_text})
+                        
+                        # Look for implementation strategy
+                        if "implementation_strategy" in parsed:
+                            strategy = parsed["implementation_strategy"]
+                            if isinstance(strategy, dict) and "roadmap" in strategy:
+                                roadmap = strategy["roadmap"]
+                                if isinstance(roadmap, list) and roadmap:
+                                    first_phase = roadmap[0]
+                                    if isinstance(first_phase, dict) and "objective" in first_phase:
+                                        experience_text = f"Implementation strategy: {first_phase['objective']}"
+                                        return json.dumps({"experience": experience_text})
+                        
+                        # Fallback: use any string field
+                        for value in parsed.values():
+                            if isinstance(value, str) and len(value) > 20:
+                                return json.dumps({"experience": value[:500]})
+                except json.JSONDecodeError:
+                    pass
+            
             return json.dumps({
                 "experience": content.strip()
             })
@@ -2333,11 +2377,28 @@ Workflow: Use write_code_file to implement your DeltaNet architecture, then prov
                                         if strengths or weaknesses:
                                             experience_content = f"Performance: {', '.join(strengths[:2])}. Limitations: {', '.join(weaknesses[:2])}"
                                 
+                                # Also check for performance_summary (new pattern observed)
+                                elif "performance_summary" in parsed:
+                                    perf = parsed["performance_summary"]
+                                    if isinstance(perf, dict):
+                                        strengths = perf.get("strengths", [])
+                                        weaknesses = perf.get("weaknesses", [])
+                                        if strengths or weaknesses:
+                                            experience_content = f"Performance: {', '.join(strengths[:2])}. Limitations: {', '.join(weaknesses[:2])}"
+                                
                                 # Or look for any summary-like fields
-                                for key in ["summary", "analysis", "insights", "conclusion", "results"]:
+                                for key in ["summary", "analysis", "insights", "conclusion", "results", "implementation_strategy", "innovation_opportunities"]:
                                     if key in parsed and isinstance(parsed[key], str):
                                         experience_content = parsed[key][:500]  # Limit length
                                         break
+                                    elif key in parsed and isinstance(parsed[key], dict):
+                                        # For nested objects, try to extract a summary
+                                        nested = parsed[key]
+                                        if "roadmap" in nested and isinstance(nested["roadmap"], list) and nested["roadmap"]:
+                                            first_phase = nested["roadmap"][0]
+                                            if isinstance(first_phase, dict) and "objective" in first_phase:
+                                                experience_content = f"Strategy: {first_phase['objective']}"
+                                                break
                                 
                                 # Or use first string value found
                                 if not experience_content:
