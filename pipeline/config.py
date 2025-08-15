@@ -31,15 +31,15 @@ class Config:
     DATABASE: str = "http://localhost:8001"
     
     # Local Model
-    # OPENAI_API_KEY: str = "dummy"
-    # OPENAI_BASE_URL: str = "http://localhost:8080/v1"  # llama.cpp server
-    # OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
+    OPENAI_API_KEY: str = "dummy"
+    OPENAI_BASE_URL: str = "http://localhost:8080/v1"  # llama.cpp server
+    OPENAI_MODEL: str = "gpt-oss-20b"  # Model name: gpt-4o, claude-3-sonnet (OpenRouter), llama3.2 (Ollama), etc.
     
     # Openrouter
     # API key will be read from environment variable OPENAI_API_KEY, with fallback to hardcoded value
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy-key-set-OPENAI_API_KEY-environment-variable")
-    OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
-    OPENAI_MODEL: str = "openai/gpt-oss-20b:free"  # Switched from gpt-oss-20b for better structured output compatibility
+    # OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy-key-set-OPENAI_API_KEY-environment-variable")
+    # OPENAI_BASE_URL: str = "https://openrouter.ai/api/v1"  # Default OpenAI, change for other providers
+    # OPENAI_MODEL: str = "z-ai/glm-4.5"  # Switched from gpt-oss-20b for better structured output compatibility
     
     # Model Prefixes Configuration
     # List of model prefixes that should be handled by any provider
@@ -47,7 +47,8 @@ class Config:
     # Works with OpenRouter, local servers, or any OpenAI-compatible API
     MODEL_PREFIXES: list[str] = [
         "qwen", "claude", "anthropic", "google", "gemini", "mistral", 
-        "cohere", "meta", "llama", "deepseek", "perplexity", "cognitivecomputations"
+        "cohere", "meta", "llama", "deepseek", "perplexity", "cognitivecomputations",
+        "mistralai", "ai21", "z-ai"
     ]
     
     # Model Adapter Configuration
@@ -56,7 +57,7 @@ class Config:
     
     # Harmony Configuration (for gpt-oss models)
     # Max tokens for harmony model completions - needs to be high for academic reasoning chains
-    HARMONY_MAX_TOKENS: int = 32768  # Max tokens for experiment responses 
+    HARMONY_MAX_TOKENS: int = 43000  # Max tokens for experiment responses 
     
     # Harmony reasoning effort level - controls model's reasoning depth
     HARMONY_REASONING_EFFORT: str = "high"  # Options: "low", "medium", "high"

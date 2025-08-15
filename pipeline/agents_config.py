@@ -682,39 +682,54 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
         # Fallback for unknown agent types
         return json.dumps({"response": content})
     
-    def _get_agent_instructions(self, agent_type: str) -> str:
-        """Get developer instructions for specific agent types."""
-        instructions = {
-            "planner": "You are an Architecture Designer. Use the write_code_file tool to implement your architectural innovations as working code.",
-            "summarizer": "You are a research summarizer. Synthesize the experimental results and research insights.",
-            "analyzer": "You are an architecture analyzer. Analyze the experimental results and provide insights.",
-            "trainer": "You are a training runner. Execute the training and report results.",
-            "debugger": "You are a debugging expert. Fix any issues in the code.",
-            "code_checker": "You are a code validator. Verify code correctness and functionality.",
-            "deduplication": "You are an innovation diversifier. Use the write_code_file tool to create unique architectural innovations.",
-            "motivation_checker": "You are a motivation checker. Check for duplicate motivations and innovations."
-        }
-        return instructions.get(agent_type, "Complete your assigned task effectively.")
     
     def _convert_to_chat_completion(self, completion_response, agent_type=None):
-        """Convert completion response to ChatCompletion format preserving tool calls."""
+        """Convert completion response to ChatCompletion format preserving tool calls.
+        
+        This method converts the raw completion response from harmony-encoded
+        gpt-oss models into the OpenAI ChatCompletion format expected by ASI-Arch.
+        """
         import json
         import re
         from openai.types.chat import ChatCompletion, ChatCompletionMessage
         from openai.types.chat.chat_completion import Choice
         from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
         
+        # Extract raw content from completion response
         content = completion_response.choices[0].text if hasattr(completion_response, 'choices') else ""
         
-        # Extract tool calls from harmony response
+        if not content:
+            logger.warning(f"⚠️ HARMONY CONVERSION: Empty content in completion response")
+            content = ""
+        
+        logger.debug(f"🔧 HARMONY CONVERSION: Processing response length: {len(content)}")
+        if len(content) > 500:
+            logger.debug(f"  Content preview: {content[:500]}...")
+        else:
+            logger.debug(f"  Full content: {content}")
+        
+        # Extract tool calls from harmony conversation structure
         tool_calls = self._extract_tool_calls_from_harmony(content)
         
-        # Extract final content from harmony channels (priority: final > assistant > analysis)
+        # Extract final content from harmony channels
         final_content = self._extract_final_content_from_harmony(content, agent_type)
+        
+        # Validate extraction results
+        if tool_calls:
+            logger.info(f"✅ HARMONY CONVERSION: Successfully extracted {len(tool_calls)} tool calls")
+            for i, call in enumerate(tool_calls):
+                logger.info(f"  Tool {i+1}: {call.function.name}")
+        else:
+            logger.debug(f"ℹ️ HARMONY CONVERSION: No tool calls found (this may be normal for non-tool responses)")
+        
+        if final_content:
+            logger.debug(f"✅ HARMONY CONVERSION: Extracted content length: {len(final_content)}")
+        else:
+            logger.warning(f"⚠️ HARMONY CONVERSION: No usable content extracted")
         
         # Create proper ChatCompletion response
         message = ChatCompletionMessage(
-            content=final_content,
+            content=final_content or "",  # Ensure content is never None
             role="assistant",
             tool_calls=tool_calls if tool_calls else None
         )
@@ -725,81 +740,288 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
             message=message
         )
         
-        return ChatCompletion(
+        completion = ChatCompletion(
             id=f"chatcmpl-{completion_response.id if hasattr(completion_response, 'id') else 'harmony'}",
             choices=[choice],
             created=getattr(completion_response, 'created', 0),
             model=getattr(completion_response, 'model', 'gpt-oss-20b'),
             object="chat.completion"
         )
+        
+        logger.debug(f"✅ HARMONY CONVERSION: Created ChatCompletion with {len(completion.choices)} choices")
+        return completion
     
     def _extract_tool_calls_from_harmony(self, content: str):
-        """Extract tool calls from harmony response."""
+        """Extract tool calls from harmony conversation format.
+        
+        Harmony format includes multiple channels and tool calls are structured as:
+        <|start|>assistant<|channel|>commentary to=functions.FUNCTION_NAME <|constrain|>json<|message|>{"args":"here"}<|call|>
+        or
+        Assistant messages with tool_calls array in conversation structure.
+        """
         import re
         import json
         from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
         
-        # Look for tool call patterns in harmony content
-        tool_call_patterns = [
-            r'<\|call\|>(\{.*?\})<\|return\|>',  # <|call|>{"function": {...}}<|return|>
-            r'"function":\s*\{[^}]*"name":\s*"write_code_file"[^}]*\}',  # JSON function calls
-            r'write_code_file\([^)]*\)',  # Function call syntax
-        ]
-        
         tool_calls = []
-        for pattern in tool_call_patterns:
-            matches = re.findall(pattern, content, re.DOTALL)
-            for match in matches:
+        
+        # DEBUG: Log what we're trying to extract from
+        logger.debug(f"🔍 TOOL EXTRACTION: Starting extraction from content length: {len(content)}")
+        
+        # Method 1: Parse harmony conversation structure for assistant messages with tool_calls
+        conversation_pattern = r'<\|start\|>assistant.*?<\|channel\|>commentary.*?to=functions\.(\w+).*?<\|constrain\|>json<\|message\|>(.*?)<\|call\|>'
+        tool_call_matches = re.findall(conversation_pattern, content, re.DOTALL)
+        
+        logger.debug(f"🔍 TOOL EXTRACTION Method 1: Found {len(tool_call_matches)} harmony commentary tool calls")
+        
+        for function_name, arguments_str in tool_call_matches:
+            try:
+                # Clean up arguments string
+                arguments_str = arguments_str.strip()
+                
+                # Parse arguments as JSON
+                if arguments_str.startswith('{') and arguments_str.endswith('}'):
+                    arguments = json.loads(arguments_str)
+                else:
+                    # If not JSON, try to extract from text
+                    arguments = {"content": arguments_str}
+                
+                tool_call = ChatCompletionMessageToolCall(
+                    id=f"call_{len(tool_calls)}",
+                    function=Function(
+                        name=function_name,
+                        arguments=json.dumps(arguments)
+                    ),
+                    type="function"
+                )
+                tool_calls.append(tool_call)
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse harmony tool call arguments: {e}")
+                continue
+        
+        # Method 2: Look for structured assistant messages with tool_calls array
+        # This handles the conversation format mentioned in the official docs
+        assistant_msg_pattern = r'"role":\s*"assistant".*?"tool_calls":\s*\[(.*?)\]'
+        assistant_matches = re.findall(assistant_msg_pattern, content, re.DOTALL)
+        
+        logger.debug(f"🔍 TOOL EXTRACTION Method 2: Found {len(assistant_matches)} assistant messages with tool_calls")
+        
+        for tool_calls_array in assistant_matches:
+            try:
+                # Parse the tool_calls array
+                tool_calls_json = f"[{tool_calls_array}]"
+                parsed_calls = json.loads(tool_calls_json)
+                
+                for call_data in parsed_calls:
+                    if isinstance(call_data, dict) and 'name' in call_data:
+                        tool_call = ChatCompletionMessageToolCall(
+                            id=f"call_{len(tool_calls)}",
+                            function=Function(
+                                name=call_data['name'],
+                                arguments=call_data.get('arguments', '{}')
+                            ),
+                            type="function"
+                        )
+                        tool_calls.append(tool_call)
+                        
+            except (json.JSONDecodeError, ValueError):
+                continue
+        
+        # Method 3: Fallback - look for commentary channel with tool information
+        commentary_pattern = r'<\|start\|>assistant<\|channel\|>commentary<\|message\|>(.*?)<\|end\|>'
+        commentary_matches = re.findall(commentary_pattern, content, re.DOTALL)
+        
+        for commentary_content in commentary_matches:
+            # Look for write_code_file specifically in commentary
+            if 'write_code_file' in commentary_content:
                 try:
-                    # Try to parse as JSON function call
-                    if match.strip().startswith('{'):
-                        call_data = json.loads(match)
-                        if 'function' in call_data:
-                            func_data = call_data['function']
-                            tool_call = ChatCompletionMessageToolCall(
-                                id=f"call_{len(tool_calls)}",
-                                function=Function(
-                                    name=func_data.get('name', 'write_code_file'),
-                                    arguments=json.dumps(func_data.get('arguments', {}))
-                                ),
-                                type="function"
-                            )
-                            tool_calls.append(tool_call)
-                            break
-                except json.JSONDecodeError:
+                    # Try to extract JSON from commentary
+                    json_match = re.search(r'\{.*?\}', commentary_content, re.DOTALL)
+                    if json_match:
+                        arguments = json.loads(json_match.group())
+                        tool_call = ChatCompletionMessageToolCall(
+                            id=f"call_{len(tool_calls)}",
+                            function=Function(
+                                name="write_code_file",
+                                arguments=json.dumps(arguments)
+                            ),
+                            type="function"
+                        )
+                        tool_calls.append(tool_call)
+                except (json.JSONDecodeError, ValueError):
                     continue
         
+        # Method 4: Enhanced tool detection - look for any function call patterns
+        tool_call_indicators = [
+            (r'write_code_file.*?filename["\s]*:["\s]*([^"]+)["\s]*.*?content["\s]*:["\s]*([^"]*)', 'write_code_file'),
+            (r'read_code_file.*?\(\s*\)', 'read_code_file'),
+            (r'run_training_script.*?architecture_name["\s]*:["\s]*([^"]+)', 'run_training_script')
+        ]
+        
+        for pattern, tool_name in tool_call_indicators:
+            matches = re.findall(pattern, content, re.DOTALL | re.IGNORECASE)
+            for match in matches:
+                try:
+                    if tool_name == 'write_code_file' and isinstance(match, tuple) and len(match) == 2:
+                        filename, file_content = match
+                        arguments = {
+                            "filename": filename.strip(),
+                            "content": file_content.strip()
+                        }
+                    elif tool_name == 'run_training_script' and isinstance(match, str):
+                        arguments = {"architecture_name": match.strip()}
+                    else:
+                        arguments = {}
+                    
+                    tool_call = ChatCompletionMessageToolCall(
+                        id=f"call_{len(tool_calls)}",
+                        function=Function(
+                            name=tool_name,
+                            arguments=json.dumps(arguments)
+                        ),
+                        type="function"
+                    )
+                    tool_calls.append(tool_call)
+                    
+                except (json.JSONDecodeError, ValueError):
+                    continue
+        
+        if tool_calls:
+            logger.info(f"✅ HARMONY EXTRACTION: Found {len(tool_calls)} tool calls")
+            for i, call in enumerate(tool_calls):
+                logger.info(f"  Tool {i+1}: {call.function.name}")
+                if hasattr(call.function, 'arguments'):
+                    logger.info(f"    Arguments: {call.function.arguments[:100]}...")  # First 100 chars
+        else:
+            logger.debug(f"⚠️ HARMONY EXTRACTION: No tool calls found in harmony response")
+            # DEBUG: Log first few hundred chars to see what we're missing
+            logger.debug(f"🔍 RAW CONTENT SAMPLE (first 300 chars): {content[:300]}")
+            logger.debug(f"🔍 RAW CONTENT SAMPLE (last 300 chars): {content[-300:]}")
+            
+            # DEBUG: Check for partial tool call patterns
+            partial_patterns = [
+                'commentary to=functions.',
+                '"filename"',
+                '"content"',
+                '<|call|>',
+                '<|constrain|>',
+                'write_code_file'
+            ]
+            found_partials = [p for p in partial_patterns if p in content]
+            logger.debug(f"🔍 PARTIAL TOOL PATTERNS FOUND: {found_partials}")
+            
         return tool_calls if tool_calls else None
     
     def _extract_final_content_from_harmony(self, content: str, agent_type=None):
-        """Extract final content from harmony channels with priority order."""
+        """Extract final content from harmony conversation structure.
+        
+        Harmony format has multiple channels:
+        - final: User-facing responses (highest priority)
+        - analysis: Chain of thought reasoning  
+        - commentary: Tool calls and internal notes
+        
+        We prioritize final channel content for the actual response.
+        """
         import re
         import json
         
-        # Priority order: final -> assistant -> analysis -> commentary -> raw
-        channel_patterns = [
-            (r'<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'final'),
-            (r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'assistant_final'),
-            (r'<\|channel\|>assistant<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'assistant'),
-            (r'<\|channel\|>analysis<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)', 'analysis'),
+        # Extract all harmony conversation messages
+        extracted_content = None
+        channel_used = None
+        
+        # Method 1: Look for final channel content (highest priority)
+        final_patterns = [
+            r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*?)<\|return\|>',
+            r'<\|start\|>assistant<\|channel\|>final<\|message\|>(.*?)<\|end\|>',
+            r'<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|return\|>|\Z)'
         ]
         
-        extracted_content = None
-        for pattern, ch_type in channel_patterns:
+        for pattern in final_patterns:
             matches = re.findall(pattern, content, re.DOTALL)
             if matches:
-                extracted_content = matches[0].strip()
+                extracted_content = matches[-1].strip()  # Take last match (most recent)
+                channel_used = 'final'
                 break
         
-        # Use original content if no channels found
+        # Method 2: Look for assistant message content (skip analysis/CoT for reasoning models)
         if not extracted_content:
-            extracted_content = content.strip()
+            assistant_patterns = [
+                r'<\|start\|>assistant<\|channel\|>assistant<\|message\|>(.*?)<\|end\|>',
+                r'<\|channel\|>assistant<\|message\|>(.*?)(?:<\|end\|>|<\|channel\|>|\Z)'
+            ]
+            
+            for pattern in assistant_patterns:
+                matches = re.findall(pattern, content, re.DOTALL)
+                if matches:
+                    extracted_content = matches[-1].strip()
+                    channel_used = 'assistant'
+                    break
+        
+        # Method 3: Look for any assistant message content
+        if not extracted_content:
+            assistant_patterns = [
+                r'<\|start\|>assistant<\|message\|>(.*?)<\|end\|>',
+                r'"role":\s*"assistant"[^}]*"content":\s*"([^"]*?)"'
+            ]
+            
+            for pattern in assistant_patterns:
+                matches = re.findall(pattern, content, re.DOTALL)
+                if matches:
+                    extracted_content = matches[-1].strip()
+                    channel_used = 'assistant'
+                    break
+        
+        # Method 4: Look for commentary channel (lowest priority, but better than nothing)
+        if not extracted_content:
+            commentary_patterns = [
+                r'<\|start\|>assistant<\|channel\|>commentary<\|message\|>(.*?)<\|end\|>'
+            ]
+            
+            for pattern in commentary_patterns:
+                matches = re.findall(pattern, content, re.DOTALL)
+                if matches:
+                    # Filter out pure tool call content
+                    for match in matches:
+                        clean_match = match.strip()
+                        if (clean_match and 
+                            not clean_match.startswith('{') and 
+                            'to=functions.' not in clean_match):
+                            extracted_content = clean_match
+                            channel_used = 'commentary'
+                            break
+                    if extracted_content:
+                        break
+        
+        # Fallback: Use cleaned raw content
+        if not extracted_content:
+            # Remove harmony tokens and use what's left
+            cleaned = re.sub(r'<\|[^|]*\|>', '', content)
+            cleaned = re.sub(r'\{[^}]*"role"[^}]*\}', '', cleaned)  # Remove JSON message structures
+            extracted_content = cleaned.strip()
+            channel_used = 'raw'
+        
+        # Clean up extracted content
+        if extracted_content:
+            # Remove any remaining harmony tokens
+            extracted_content = re.sub(r'<\|[^|]*\|>', '', extracted_content)
+            # Remove escape sequences
+            extracted_content = extracted_content.replace('\\n', '\n').replace('\\"', '"')
+            extracted_content = extracted_content.strip()
+        
+        # Log extraction result
+        if extracted_content:
+            logger.debug(f"✅ HARMONY CONTENT: Extracted from '{channel_used}' channel, length: {len(extracted_content)}")
+            logger.debug(f"  Content preview: {extracted_content[:150]}...")
+        else:
+            logger.warning(f"⚠️ HARMONY CONTENT: No usable content found in harmony response")
+            extracted_content = ""  # Ensure we don't return None
         
         # Convert to agent-appropriate JSON format if needed
-        if agent_type and not extracted_content.strip().startswith('{'):
+        if agent_type and extracted_content and not extracted_content.strip().startswith('{'):
             return self._format_content_for_agent(extracted_content, agent_type)
         
-        return extracted_content
+        return extracted_content or ""
     
     def _format_content_for_agent(self, content: str, agent_type: str) -> str:
         """Format content for specific agent types."""
@@ -871,21 +1093,69 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 logger.info(f"🔧 LOCAL HARMONY: base_url = {kwargs.get('base_url', Config.OPENAI_BASE_URL)}")
                 logger.info(f"🔧 LOCAL HARMONY: api_key = {kwargs.get('api_key', Config.OPENAI_API_KEY)}")
                 
-            # Simple harmony encoding using Config values
+                # DEBUG: Show exactly what messages are being sent to harmony
+                logger.info(f"🔧 MESSAGES TO HARMONY: {len(messages)} messages")
+                for i, msg in enumerate(messages):
+                    role = msg.get('role', 'unknown')
+                    content_preview = str(msg.get('content', ''))[:100] + '...' if len(str(msg.get('content', ''))) > 100 else str(msg.get('content', ''))
+                    logger.info(f"  Message {i+1}: {role} - {content_preview}")
+                
+            # Simple harmony encoding using Config values with agent-specific tool calling instructions
+            if agent_type == 'planner':
+                model_identity = f"You are the lead architecture researcher. This is YOUR research project. Analyze the experimental evidence, then implement your breakthrough architecture. After analysis, use: <|end|><|start|>assistant<|channel|>commentary to=functions.write_code_file <|constrain|>json<|message|>{{\"filename\":\"current_architecture.py\",\"content\":\"class DeltaNet(torch.nn.Module):\\n    def __init__(self, **kwargs):\\n        super().__init__()\\n        # implementation\\n\\nModel = DeltaNet\"}}<|call|>. This is YOUR architecture to implement."
+            else:
+                model_identity = f"You are a tool-using AI agent. When tools are available, you MUST use them immediately using harmony format: <|start|>assistant<|channel|>commentary to=functions.FUNCTION_NAME <|constrain|>json<|message|>{{\"param\":\"value\"}}<|call|>. Do NOT explain or analyze - USE TOOLS DIRECTLY. Be concise and action-oriented."
+            
+            # Enhanced harmony system prompt for first-person research execution
+            if agent_type == 'planner':
+                system_instructions = "You are conducting architecture research. Execute your research plan directly. Never refer to external users or requests - this is your own research project."
+                
+                # Prepend role clarification to messages
+                role_message = {
+                    'role': 'system', 
+                    'content': 'You are the lead researcher. This research is your own work. Implement architectures directly without meta-analysis.'
+                }
+                messages = [role_message] + list(messages)
+            else:
+                system_instructions = "Execute tasks directly as the assigned agent."
+                
             harmony_params = {
                 'messages': messages,
                 'reasoning_effort': Config.HARMONY_REASONING_EFFORT.lower(),  # "high"
                 'add_generation_prompt': True,
-                'model_identity': f"You are an expert AI assistant specialized in neural architecture research."
+                'model_identity': model_identity,
+                'developer_instructions': system_instructions  # Use valid parameter name
             }
             
             # CRITICAL: Add tools if provided (for tool calling)
             if tools:
                 harmony_params['tool_calls'] = tools
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.info(f"🔧 LOCAL HARMONY: Added {len(tools)} tools - expecting tool calls in response")
+                    logger.info(f"🔧 LOCAL HARMONY: Tool calling instructions added to force proper harmony format")
+                    
+                    # DEBUG: Show exactly which tools are available to the model
+                    logger.info(f"🔧 TOOLS AVAILABLE TO MODEL:")
+                    for i, tool in enumerate(tools):
+                        if isinstance(tool, dict) and 'function' in tool:
+                            tool_name = tool['function'].get('name', 'unknown')
+                            tool_desc = tool['function'].get('description', 'no description')
+                            logger.info(f"  Tool {i+1}: {tool_name} - {tool_desc}")
+                        else:
+                            logger.info(f"  Tool {i+1}: {tool} (unexpected format)")
+                    
+                    # Check specifically for write_code_file
+                    write_tool_present = any(
+                        isinstance(tool, dict) and 
+                        tool.get('function', {}).get('name') == 'write_code_file' 
+                        for tool in tools
+                    )
+                    logger.info(f"🔧 WRITE_CODE_FILE TOOL PRESENT: {write_tool_present}")
+            else:
+                if Config.DEBUG_HARMONY_ENCODING:
+                    logger.warning(f"🔧 LOCAL HARMONY: NO TOOLS PROVIDED TO MODEL!")
                 
-            # Add agent-specific developer instructions if needed
-            if agent_type:
-                harmony_params['developer_instructions'] = self._get_agent_instructions(agent_type)
+            # No developer instructions - let agent prompts handle tool calling naturally
                 
             # Encode conversation
             encoded_result = encode_conversations_with_harmony(**harmony_params)
@@ -894,6 +1164,12 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
             if Config.DEBUG_HARMONY_ENCODING:
                 logger.info(f"✅ LOCAL HARMONY: Successfully encoded conversation")
                 logger.info(f"🔧 LOCAL HARMONY: Final encoded length = {len(encoded_text)}")
+                
+                # DEBUG: Print the ENTIRE harmony-encoded payload
+                logger.info(f"🔧 FULL HARMONY PAYLOAD:")
+                logger.info(f"{'='*50} START HARMONY PAYLOAD {'='*50}")
+                logger.info(encoded_text)
+                logger.info(f"{'='*50} END HARMONY PAYLOAD {'='*50}")
                 
             # Simple completion call using Config values
             client = openai.AsyncOpenAI(
@@ -913,6 +1189,25 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
             
             if Config.DEBUG_HARMONY_ENCODING:
                 logger.info(f"🔧 LOCAL HARMONY: Completion response type = {type(response)}")
+                
+                # CRITICAL DEBUG: Log the actual model response content
+                if hasattr(response, 'choices') and response.choices:
+                    raw_content = response.choices[0].text if hasattr(response.choices[0], 'text') else str(response.choices[0])
+                    logger.info(f"🔧 RAW MODEL RESPONSE: Length = {len(raw_content)}")
+                    logger.info(f"🔧 RAW MODEL RESPONSE: First 500 chars = {raw_content[:500]}")
+                    logger.info(f"🔧 RAW MODEL RESPONSE: Last 500 chars = {raw_content[-500:]}")
+                    
+                    # Look for harmony tokens to understand format
+                    harmony_tokens = ['<|start|>', '<|channel|>', '<|message|>', '<|end|>', '<|return|>', '<|call|>']
+                    found_tokens = [token for token in harmony_tokens if token in raw_content]
+                    logger.info(f"🔧 HARMONY TOKENS FOUND: {found_tokens}")
+                    
+                    # Look for tool-related content
+                    tool_indicators = ['write_code_file', 'tool_calls', 'function', 'arguments', 'filename', 'content']
+                    found_indicators = [indicator for indicator in tool_indicators if indicator in raw_content.lower()]
+                    logger.info(f"🔧 TOOL INDICATORS FOUND: {found_indicators}")
+                else:
+                    logger.warning(f"🔧 RAW MODEL RESPONSE: No choices found in response!")
             
             # CRITICAL: Convert to ChatCompletion format preserving tool calls
             return self._convert_to_chat_completion(response, agent_type=agent_type)
@@ -2745,23 +3040,32 @@ def patch_agents_multi_provider():
         from pipeline.config import Config
         api_key = Config.OPENAI_API_KEY
         base_url = Config.OPENAI_BASE_URL
+        common_prefixes = Config.MODEL_PREFIXES
     except ImportError:
         # Fallback to environment variables
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+        # Fallback model prefixes
+        common_prefixes = [
+            "qwen", "claude", "anthropic", "google", "gemini", "mistral", 
+            "cohere", "meta", "llama", "deepseek", "perplexity", "cognitivecomputations",
+            "mistralai", "ai21", "z-ai"
+        ]
     
     # Create a custom provider map that includes configurable model prefixes
     provider_map = MultiProviderMap()
     
-    # Get model prefixes from config (works with any provider: OpenRouter, local servers, etc.)
-    common_prefixes = Config.MODEL_PREFIXES
-    
-    for prefix in common_prefixes:
-        provider_map.add_provider(prefix, create_openrouter_provider(
-            prefix=prefix, 
-            api_key=api_key, 
-            base_url=base_url
-        ))
+    # Only add providers if we have a valid API key
+    if api_key and api_key != "dummy" and api_key != "dummy-key-set-OPENAI_API_KEY-environment-variable":
+        for prefix in common_prefixes:
+            provider_map.add_provider(prefix, create_openrouter_provider(
+                prefix=prefix, 
+                api_key=api_key, 
+                base_url=base_url
+            ))
+        print("Successfully patched MultiProvider for compatibility")
+    else:
+        print("Skipping MultiProvider patch - no valid API key")
     
     # Store the original __init__ method
     original_init = MultiProvider.__init__
