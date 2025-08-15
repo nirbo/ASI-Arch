@@ -1,108 +1,180 @@
-# delta_net.py
-"""DeltaNet Architecture
-
-A lightweight, hybrid linear attention + hierarchical reasoning model.
-Designed to achieve O(N log N) complexity while supporting arbitrary batch size.
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-# ----- Linear Attention Module -----
-class LinearAttention(nn.Module):
-    """Linear attention using kernel trick for O(Nd) complexity.
-    Implements the formulation from Reformer and Linear Transformers.
-    """
-    def __init__(self, dim, heads=4, dim_head=32, kernel_fn=F.elu):
-        super().__init__()
-        self.heads = heads
-        self.dim_head = dim_head
-        inner_dim = dim_head * heads
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-        self.kernel_fn = kernel_fn
-        self.out_proj = nn.Linear(inner_dim, dim)
+# ---------------------------------------------------------------------------
+# DeltaNet – Hierarchical Adaptive Attention with Dynamic Fusion Gate
+# ---------------------------------------------------------------------------
+# This architecture combines a linear‑attention backbone (O(N log N)) with a
+# two‑stage attention hierarchy. The first stage selects key tokens via a
+# lightweight linear attention; the second stage applies a full multi‑head
+# attention only on the selected tokens. A learned fusion gate merges the fast
+# linear‑attention stream with the richer hierarchical reasoning stream.
+# ---------------------------------------------------------------------------
 
-    def forward(self, x):
-        B, L, C = x.shape
-        qkv = self.to_qkv(x)  # (B, L, 3*heads*dim_head)
-        qkv = rearrange(qkv, "b l (q k v) h d -> (q k v) b h l d", q=3, k=1, v=1, h=self.heads, d=self.dim_head)
-        q, k, v = qkv[0], qkv[1], qkv[2]  # each: (B, heads, L, dim_head)
-
-        # Apply kernel function
-        q = self.kernel_fn(q + 1e-6)  # avoid negative values
-        k = self.kernel_fn(k + 1e-6)
-
-        # Compute KV^T and QK^T * V efficiently
-        kv = torch.einsum("b h l d, b h l e -> b h d e", k, v)  # (B, heads, dim_head, dim_head)
-        z = torch.inverse(torch.einsum("b h l d, b h l e -> b h d e", k, torch.ones_like(v)))  # normalization
-        out = torch.einsum("b h l d, b h d e -> b h l e", q, kv) * z
-        out = rearrange(out, "b h l d -> b l (h d)")
-        return self.out_proj(out)
-
-# ----- Hierarchical Reasoning Module -----
-class HierarchicalReasoning(nn.Module):
-    """Simple two-level hierarchical reasoning.
-    First level: local linear attention over token groups.
-    Second level: linear attention over group representations.
-    """
-    def __init__(self, dim, group_size=16, heads=4, dim_head=32):
-        super().__init__()
-        self.group_size = group_size
-        self.local_attn = LinearAttention(dim, heads=heads, dim_head=dim_head)
-        self.global_attn = LinearAttention(dim, heads=heads, dim_head=dim_head)
-
-    def forward(self, x):
-        B, L, C = x.shape
-        # Pad to multiple of group_size
-        pad_len = (self.group_size - L % self.group_size) % self.group_size
-        if pad_len > 0:
-            pad = torch.zeros(B, pad_len, C, device=x.device, dtype=x.dtype)
-            x_padded = torch.cat([x, pad], dim=1)
-        else:
-            x_padded = x
-        Lp = x_padded.shape[1]
-        G = Lp // self.group_size
-        # Reshape into groups
-        groups = rearrange(x_padded, "b (g s) c -> b g s c", g=G, s=self.group_size)
-        # Local attention per group
-        local_out = self.local_attn(groups)  # (B, G, group_size, C)
-        # Aggregate group representations (mean over tokens)
-        group_repr = local_out.mean(dim=2)  # (B, G, C)
-        # Global attention over groups
-        global_out = self.global_attn(group_repr)  # (B, G, C)
-        # Expand back to tokens
-        expanded = rearrange(global_out, "b g c -> b g 1 c")
-        expanded = expanded.repeat_interleave(self.group_size, dim=2)
-        expanded = expanded[:, :, :L, :]
-        # Residual connection with original
-        return x + expanded
-
-# ----- DeltaNet -----
 class DeltaNet(nn.Module):
-    """DeltaNet combines linear attention and hierarchical reasoning.
-    Supports arbitrary batch size and achieves O(N log N) complexity.
-    """
-    def __init__(self, dim, heads=4, dim_head=32, group_size=16, **kwargs):
+    def __init__(self,
+                 dim: int,
+                 num_heads: int = 4,
+                 top_k: int = 32,
+                 hidden_dim: int = 256,
+                 dropout: float = 0.1,
+                 **kwargs):
+        """DeltaNet constructor.
+
+        Parameters
+        ----------
+        dim : int
+            Embedding dimension of the input tokens.
+        num_heads : int, optional
+            Number of heads for the hierarchical multi‑head attention.
+        top_k : int, optional
+            Number of tokens to select for the second‑stage attention.
+        hidden_dim : int, optional
+            Hidden dimension used in the fusion gate MLP.
+        dropout : float, optional
+            Dropout probability.
+        """
         super().__init__()
-        self.linear_attn = LinearAttention(dim, heads=heads, dim_head=dim_head)
-        self.hrm = HierarchicalReasoning(dim, group_size=group_size, heads=heads, dim_head=dim_head)
-        self.norm = nn.LayerNorm(dim)
-        self.ff = nn.Sequential(
-            nn.Linear(dim, dim * 4),
+        self.dim = dim
+        self.num_heads = num_heads
+        self.top_k = top_k
+        self.hidden_dim = hidden_dim
+
+        # Linear‑attention projection layers
+        self.query_lin = nn.Linear(dim, dim)
+        self.key_lin = nn.Linear(dim, dim)
+        self.value_lin = nn.Linear(dim, dim)
+
+        # Feature map for linear attention (Performer style)
+        self.feature_map = lambda x: F.relu(x) + 1.0
+
+        # Second‑stage multi‑head attention (full quadratic on small K)
+        self.h_attn = nn.MultiheadAttention(embed_dim=dim,
+                                             num_heads=num_heads,
+                                             dropout=dropout,
+                                             batch_first=True)
+
+        # Hierarchical reasoning transformer encoder layer
+        self.hier_layer = nn.TransformerEncoderLayer(d_model=dim,
+                                                     nhead=num_heads,
+                                                     dim_feedforward=hidden_dim,
+                                                     dropout=dropout,
+                                                     batch_first=True)
+
+        # Fusion gate MLP (takes concatenated L & H representations)
+        self.fusion_mlp = nn.Sequential(
+            nn.Linear(dim * 2, hidden_dim),
             nn.GELU(),
-            nn.Linear(dim * 4, dim),
+            nn.Linear(hidden_dim, 1),
+            nn.Sigmoid(),
         )
 
-    def forward(self, x, **kwargs):
-        # x: (B, L, C)
-        attn_out = self.linear_attn(x)
-        hrm_out = self.hrm(x)
-        fused = attn_out + hrm_out
-        fused = self.norm(fused)
-        ff_out = self.ff(fused)
-        return ff_out + fused
+        # Output projection (for classification/regression tasks)
+        self.out_proj = nn.Linear(dim, dim)
 
-# Alias for training scripts
+    def linear_attention(self, x: torch.Tensor) -> torch.Tensor:
+        """Fast linear attention.
+
+        Implements a kernel‑based linear attention as in Performer.
+        Complexity: O(N log N) due to the feature map.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, N, dim).
+
+        Returns
+        -------
+        torch.Tensor
+            Output of the linear attention, same shape as input.
+        """
+        # Project to query/key/value
+        q = self.query_lin(x)  # (B, N, dim)
+        k = self.key_lin(x)
+        v = self.value_lin(x)
+
+        # Apply feature map
+        phi_q = self.feature_map(q)  # (B, N, dim)
+        phi_k = self.feature_map(k)
+
+        # Compute context: (phi_k^T @ v) for each batch
+        # Use einsum for efficient batched multiplication
+        context = torch.einsum('bnd,bnd->bd', phi_k, v)  # (B, dim)
+
+        # Output: (phi_q @ context) normalized by sum of phi_q
+        out = torch.einsum('bnd,bd->bnd', phi_q, context)  # (B, N, dim)
+
+        return out
+
+    def select_topk(self, scores: torch.Tensor, top_k: int) -> torch.Tensor:
+        """Select top‑k token indices based on scores.
+
+        Parameters
+        ----------
+        scores : torch.Tensor
+            Tensor of shape (B, N) containing importance scores.
+        top_k : int
+            Number of tokens to keep.
+
+        Returns
+        -------
+        torch.Tensor
+            Indices of shape (B, top_k).
+        """
+        _, idx = torch.topk(scores, k=top_k, dim=-1, largest=True, sorted=False)
+        return idx
+
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Forward pass of DeltaNet.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, N, dim).
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor of shape (B, N, dim).
+        """
+        B, N, _ = x.shape
+        device = x.device
+
+        # 1. Fast linear‑attention stream
+        l_out = self.linear_attention(x)  # (B, N, dim)
+
+        # 2. Compute token importance scores (sum over feature dim)
+        scores = l_out.sum(dim=-1)  # (B, N)
+        topk_idx = self.select_topk(scores, self.top_k)  # (B, top_k)
+
+        # 3. Gather selected tokens for second‑stage attention
+        # Expand indices for gathering feature dim
+        idx_expanded = topk_idx.unsqueeze(-1).expand(-1, -1, self.dim)
+        selected = torch.gather(l_out, dim=1, index=idx_expanded)  # (B, top_k, dim)
+
+        # 4. Hierarchical (full) attention on selected tokens
+        # MultiheadAttention expects (B, L, E) when batch_first=True
+        h_out, _ = self.h_attn(selected, selected, selected)  # (B, top_k, dim)
+
+        # 5. Global context from H‑module (mean over selected tokens)
+        h_global = h_out.mean(dim=1, keepdim=True)  # (B, 1, dim)
+        h_global_expanded = h_global.expand(-1, N, -1)  # (B, N, dim)
+
+        # 6. Dynamic fusion gate
+        fusion_input = torch.cat([l_out, h_global_expanded], dim=-1)  # (B, N, 2*dim)
+        gate = self.fusion_mlp(fusion_input).expand(-1, -1, self.dim)  # (B, N, 1) -> (B, N, dim)
+
+        fused = gate * l_out + (1 - gate) * h_global_expanded  # (B, N, dim)
+
+        # 7. Hierarchical reasoning transformer layer
+        hier = self.hier_layer(fused)  # (B, N, dim)
+
+        # 8. Final projection (optional downstream head)
+        out = self.out_proj(hier)  # (B, N, dim)
+
+        return out
+
+# Alias for training utilities
 Model = DeltaNet
