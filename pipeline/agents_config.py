@@ -1116,9 +1116,15 @@ class HarmonyAwareAsyncOpenAI(AsyncOpenAI):
                 return self._format_content_for_agent(extracted_content, agent_type)
             else:
                 # Content looks like JSON, but it might be malformed
-                # For motivation_checker, always validate and fix JSON
+                # For motivation_checker, planner, and summarizer, always validate and fix JSON
                 if agent_type == "motivation_checker":
                     logger.debug(f"🔧 MOTIVATION_CHECKER: Processing JSON-like content")
+                    return self._format_content_for_agent(extracted_content, agent_type)
+                elif agent_type == "planner":
+                    logger.debug(f"🔧 PLANNER: Processing JSON-like content")
+                    return self._format_content_for_agent(extracted_content, agent_type)
+                elif agent_type == "summarizer":
+                    logger.debug(f"🔧 SUMMARIZER: Processing JSON-like content")
                     return self._format_content_for_agent(extracted_content, agent_type)
         
         return extracted_content or ""
