@@ -1,16 +1,7 @@
-# The following imports may fail in the static analysis environment if torch is not available.
-# They are required at runtime when the training script is executed.
-try:
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
-except Exception:  # pragma: no cover
-    torch = None  # type: ignore
-    nn = None  # type: ignore
-    F = None  # type: ignore
+import torch
+import torch.nn as nn
 
-class DeltaNet(nn.Module if nn is not None else object):  # type: ignore
-
+class DeltaNet(nn.Module):
     """Minimal vanilla transformer – baseline for memory‑reduction experiments."""
     def __init__(self, vocab_size: int, d_model: int = 768, n_heads: int = 12, n_layers: int = 6, dropout: float = 0.1, **kwargs):
         super().__init__()
@@ -21,10 +12,8 @@ class DeltaNet(nn.Module if nn is not None else object):  # type: ignore
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None):
-        # input_ids: (B, T)
         h = self.embedding(input_ids) + self.pos_emb[:, :input_ids.size(1)]
         if attention_mask is not None:
-            # make mask for transformer: 0 = keep, 1 = ignore
             attn_mask = attention_mask.unsqueeze(1).unsqueeze(2)  # (B,1,1,T)
             attn_mask = attn_mask == 0
             h = self.encoder(h, src_key_padding_mask=~attn_mask.squeeze(1))
