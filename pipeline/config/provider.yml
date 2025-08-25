@@ -2,7 +2,7 @@
 # Replace values to point to your desired LLM provider
 model:
   name: gpt-oss-20b            # default model name
-  base_url: http://localhost:8080/v1   # default base URL
+  base_url: http://192.168.100.100:8080/v1   # default base URL
   api_key: dummy                 # default API key (override in env)
 
 rag:
