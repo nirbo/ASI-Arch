@@ -1,0 +1,15 @@
+{
+  "time": "2025-08-25 17:45:00",
+  "name": "transformer_quadratic_free",
+  "result": {
+    "train": "step,100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000\nloss,10.2629,8.9712,7.6769,6.9779,6.5788,6.2249,6.0558,5.8544,5.7071,5.5044,5.3517,5.2153,5.1558,4.9783,4.9156,4.9054,4.7193,4.6739,4.6408,4.5787",
+    "test": "Model,ARC Challenge,ARC Easy,BoolQ,FDA,HellaSwag,LAMBDA OpenAI,OpenBookQA,PIQA,Social IQA,SQuAD Completion,SWDE,WinoGrande,Average\ntransformer_quadratic_free,0.168,0.324,0.364,0.000,0.296,0.002,0.136,0.526,0.354,0.002,0.008,0.504,0.224"
+  },
+  "program": "# placeholder for the new transformer architecture code",
+  "analysis": "We propose a transformer variant that replaces the standard attention matrix with a linearized attention mechanism (e.g., kernel-based or sparse attention) to reduce memory from O(L^2) to O(L). The model will employ a kernel approximation (such as random feature mapping) to compute attention in linear time, enabling very long context windows without quadratic memory cost.",
+  "cognition": "",
+  "log": "",
+  "motivation": "To enable research on memory‑efficient transformer architectures.",
+  "parent": null,
+  "summary": ""
+}

@@ -1,15 +1,23 @@
 import asyncio
 
 from agents import set_default_openai_api, set_default_openai_client, set_tracing_disabled
-from openai import AsyncAzureOpenAI
+from openai import AsyncOpenAI
 
 from analyse import analyse
 from database import program_sample, update
 from eval import evaluation
 from evolve import evolve
 from utils.agent_logger import end_pipeline, log_error, log_info, log_step, log_warning, start_pipeline
+from tools.provider import get_global_provider
 
-client = AsyncAzureOpenAI()
+# Initialize client using generic provider connector
+provider = get_global_provider()
+model_params = provider.get_model_params()
+
+client = AsyncOpenAI(
+    api_key=model_params.get("api_key", "dummy"),
+    base_url=model_params.get("base_url", "http://localhost:8080/v1")
+)
 
 set_default_openai_client(client)
 set_default_openai_api("chat_completions") 
@@ -93,7 +101,7 @@ async def main():
                 log_info(f"Experiment {experiment_count} completed successfully, starting next experiment...")
             else:
                 log_warning(f"Experiment {experiment_count} failed, retrying in 60 seconds...")
-                await asyncio.sleep(60)
+                await asyncio.sleep(5)
                 
         except KeyboardInterrupt:
             log_warning("Continuous experiment interrupted by user")

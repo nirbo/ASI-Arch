@@ -45,6 +45,22 @@ class ProviderConnector:
     def get_rag_params(self) -> Dict[str, Any]:
         return self.config.get("rag", {})
 
+# Global instance for easy access
+_global_connector = None
+
+def get_global_provider() -> ProviderConnector:
+    """Get the global provider connector instance."""
+    global _global_connector
+    if _global_connector is None:
+        _global_connector = ProviderConnector()
+    return _global_connector
+
+# Convenience properties for backward compatibility
+class ModelConfig:
+    @property
+    def model_name(self) -> str:
+        return get_global_provider().get_model_params().get("name", "gpt-oss-20b")
+
 # Example usage
 # connector = ProviderConnector()
 # model_params = connector.get_model_params()

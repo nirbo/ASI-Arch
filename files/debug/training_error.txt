@@ -1,0 +1,57 @@
+Experiment: test_launch_fixed
+Error: Training failed: Expected key_padded_mask.shape[0] to be 128, but got 64
+Traceback (most recent call last):
+  File "/home/nir/ml-tools/ASI-Arch/train_architecture.py", line 352, in main
+    complexity_results = measure_complexity_scaling(model, tokenizer, device)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/train_architecture.py", line 102, in measure_complexity_scaling
+    _ = model(input_ids, attention_mask)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/pipeline/current_architecture.py", line 34, in forward
+    h = self.encoder(h, src_key_padding_mask=padding_mask)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/transformer.py", line 524, in forward
+    output = mod(
+             ^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/transformer.py", line 935, in forward
+    + self._sa_block(x, src_mask, src_key_padding_mask, is_causal=is_causal)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/transformer.py", line 949, in _sa_block
+    x = self.self_attn(
+        ^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/modules/activation.py", line 1380, in forward
+    attn_output, attn_output_weights = F.multi_head_attention_forward(
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/functional.py", line 6414, in multi_head_attention_forward
+    _check_key_padding_mask(key_padding_mask, src_len, bsz)
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/nn/functional.py", line 6063, in _check_key_padding_mask
+    torch._check_with(
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/__init__.py", line 1666, in _check_with
+    raise error_type(message_evaluated)
+AssertionError: Expected key_padded_mask.shape[0] to be 128, but got 64
+
+Arguments: {'experiment_name': 'test_launch_fixed', 'epochs': 1, 'batch_size': 2, 'learning_rate': 0.0001, 'max_length': 128, 'dataset_size': 50, 'no_wandb': True}

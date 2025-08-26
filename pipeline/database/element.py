@@ -2,7 +2,6 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Optional
 
 from utils.agent_logger import log_agent_run
-from .model import summarizer
 from .prompt import Summary_input
 
 
@@ -27,6 +26,9 @@ class DataElement:
     
     async def get_context(self) -> str:
         """Generate enhanced context with structured experimental evidence presentation."""
+        # Lazy import to avoid circular dependency
+        from .model import summarizer
+        
         summary = await log_agent_run(
             "summarizer",
             summarizer,

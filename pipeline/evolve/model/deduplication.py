@@ -1,6 +1,7 @@
 from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file, write_code_file
+from tools.provider import ProviderConnector
 
 class DeduplicationOutput(BaseModel):
     name: str
@@ -111,6 +112,6 @@ deduplication = Agent(
 - **Breakthrough Potential**: Create code with clear pathways to significant performance improvements through novel mechanisms""",
     
     output_type=DeduplicationOutput,
-    model='o3',
+    model=ProviderConnector().get_model_params().get("name"),
     tools=[read_code_file, write_code_file]
 )

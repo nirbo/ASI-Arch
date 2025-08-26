@@ -4,6 +4,14 @@ from pydantic import BaseModel
 class SummaryOutput(BaseModel):
     experience: str
 
+def get_model_name():
+    """Get model name from config without circular import."""
+    try:
+        from pipeline.tools.provider import ModelConfig
+        return ModelConfig().model_name
+    except ImportError:
+        return "gpt-oss-20b"  # Fallback
+
 # Summary Agent
 summarizer = Agent(
     name="Experience Synthesizer",
@@ -76,6 +84,6 @@ Your experience synthesis should enable the Planner to:
 - Avoid repeating unsuccessful approaches from previous iterations""",
     
     output_type=SummaryOutput,
-    model='gpt-4.1',
+    model=get_model_name(),
     tools=[]
 )

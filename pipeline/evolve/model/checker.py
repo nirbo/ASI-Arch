@@ -2,6 +2,14 @@ from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file, write_code_file
 
+def get_model_name():
+    """Get model name from config without circular import."""
+    try:
+        from pipeline.tools.provider import ModelConfig
+        return ModelConfig().model_name
+    except ImportError:
+        return "gpt-oss-20b"  # Fallback
+
 class CodeCheckerOutput(BaseModel):
     success: bool
     error: str
@@ -86,6 +94,6 @@ When you identify problems, you MUST:
 Remember: Your goal is to ensure correctness while encouraging innovation. Fix technical issues, not creative choices.""",
     
     output_type=CodeCheckerOutput,
-    model='o3',
+    model=get_model_name(),
     tools=[read_code_file, write_code_file]
 )

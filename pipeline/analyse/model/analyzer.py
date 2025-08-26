@@ -2,6 +2,13 @@ from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file
 
+def get_model_name():
+    """Get model name from config without circular import."""
+    try:
+        from pipeline.tools.provider import ModelConfig
+        return ModelConfig().model_name
+    except ImportError:
+        return "gpt-oss-20b"  # Fallback
 
 class AnalyzerOutput(BaseModel):
     design_evaluation: str
@@ -114,6 +121,6 @@ Remember: Your goal is to understand the relationship between architectural desi
 
 """,
     output_type=AnalyzerOutput,
-    model='o3',
+    model=get_model_name(),
     tools=[read_code_file]
 )

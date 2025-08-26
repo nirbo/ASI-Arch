@@ -2,6 +2,14 @@ from agents import Agent
 from pydantic import BaseModel
 from tools import read_code_file, write_code_file
 
+def get_model_name():
+    """Get model name from config without circular import."""
+    try:
+        from pipeline.tools.provider import ModelConfig
+        return ModelConfig().model_name
+    except ImportError:
+        return "gpt-oss-20b"  # Fallback
+
 class DebuggerOutput(BaseModel):
     changes_made: str
 
@@ -86,6 +94,6 @@ debugger = Agent(
 Provide a concise description of what was changed to fix the training error, focusing on whether it was a runtime fix or complexity optimization.""",
     
     output_type=DebuggerOutput,
-    model='gpt-4.1',
+    model=get_model_name(),
     tools=[read_code_file, write_code_file]
 )

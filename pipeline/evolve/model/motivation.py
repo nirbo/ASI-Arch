@@ -1,5 +1,6 @@
 from agents import Agent
 from pydantic import BaseModel
+from tools.provider import ProviderConnector
 
 class MotivationCheckOutput(BaseModel):
     is_repeated: bool
@@ -52,5 +53,5 @@ Analyze a given motivation statement against a collection of previously recorded
     """,
     output_type=MotivationCheckOutput,
     tools=[],
-    model='gpt-4.1',
+    model=ProviderConnector().get_model_params().get("name"),
 )

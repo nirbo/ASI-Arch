@@ -6,6 +6,13 @@ class TrainingResultOutput(BaseModel):
     success: bool
     error: str
 
+def get_model_name():
+    """Get model name from config without circular import."""
+    try:
+        from pipeline.tools.provider import ModelConfig
+        return ModelConfig().model_name
+    except ImportError:
+        return "gpt-oss-20b"  # Fallback
 trainer = Agent(
     name="Training Runner",
     instructions="""You are an expert in running neural network training experiments.
@@ -20,5 +27,5 @@ trainer = Agent(
     Your error explanation should be helpful for debugging and fixing the issue.""",
     tools=[run_training_script],
     output_type=TrainingResultOutput,
-    model="gpt-4.1"
+    model=get_model_name()
 )
