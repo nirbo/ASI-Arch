@@ -37,10 +37,24 @@ async def program_sample() -> Tuple[str, int]:
     parent = parent_element.index
     
     # Write the program of the UCT selected node
-    # If no node is selected, use the best result
-    with open(Config.SOURCE_FILE, 'w', encoding='utf-8') as f:
-        f.write(parent_element.program)
-        print(f"[DATABASE] Implement Changes selected node (index: {parent})")
+    # But preserve the current file if it already has a complete architecture
+    try:
+        # Check if current file has build_model function (indicates complete architecture)
+        with open(Config.SOURCE_FILE, 'r', encoding='utf-8') as f:
+            current_content = f.read()
+        
+        if 'def build_model' in current_content and 'class H1TitansModel' in current_content:
+            print(f"[DATABASE] Keeping current complete architecture instead of node (index: {parent})")
+        else:
+            # Current file is incomplete, use database version
+            with open(Config.SOURCE_FILE, 'w', encoding='utf-8') as f:
+                f.write(parent_element.program)
+                print(f"[DATABASE] Implement Changes selected node (index: {parent})")
+    except FileNotFoundError:
+        # File doesn't exist, use database version
+        with open(Config.SOURCE_FILE, 'w', encoding='utf-8') as f:
+            f.write(parent_element.program)
+            print(f"[DATABASE] Implement Changes selected node (index: {parent})")
     
     return context, parent
 

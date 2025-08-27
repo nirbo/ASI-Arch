@@ -32,7 +32,8 @@ class DataElement:
         summary = await log_agent_run(
             "summarizer",
             summarizer,
-            Summary_input(self.motivation, self.analysis, self.cognition)
+            Summary_input(self.motivation, self.analysis, self.cognition),
+            max_turns=30
         )
         summary_result = summary.final_output.experience
 

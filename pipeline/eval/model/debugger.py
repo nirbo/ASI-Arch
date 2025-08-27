@@ -91,7 +91,13 @@ debugger = Agent(
 - **Preserve algorithmic intent** - optimize implementation, not the core algorithm
 
 ## Output:
-Provide a concise description of what was changed to fix the training error, focusing on whether it was a runtime fix or complexity optimization.""",
+CRITICAL: Return ONLY JSON in this exact format. NO other text before or after:
+
+{
+  "changes_made": "Brief description of fix applied"
+}
+
+Use ASCII characters only. No Unicode, no markdown, no formatting.""",
     
     output_type=DebuggerOutput,
     model=get_model_name(),

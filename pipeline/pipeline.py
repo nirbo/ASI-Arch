@@ -8,7 +8,11 @@ from database import program_sample, update
 from eval import evaluation
 from evolve import evolve
 from utils.agent_logger import end_pipeline, log_error, log_info, log_step, log_warning, start_pipeline
+from utils.agent_wrapper import apply_global_json_sanitization
 from tools.provider import get_global_provider
+
+# Apply global JSON sanitization to prevent Unicode parsing errors
+apply_global_json_sanitization()
 
 # Initialize client using generic provider connector
 provider = get_global_provider()

@@ -1,5 +1,7 @@
 import subprocess
 from typing import Any, Dict
+import os
+import shutil
 
 from agents import function_tool
 from config import Config
@@ -42,14 +44,27 @@ def read_csv_file(file_path: str) -> Dict[str, Any]:
 
 @function_tool
 def write_code_file(content: str) -> Dict[str, Any]:
-    """Write content to a code file."""
+    """Write content to a code file with H1-Titans protection."""
     source_file = Config.SOURCE_FILE
     try:
+        # Create backup before overwriting
+        backup_file = source_file + ".backup"
+        if os.path.exists(source_file):
+            shutil.copy2(source_file, backup_file)
+        
+        # Verify content has required H1-Titans components
+        if ('class H1TitansModel' not in content or 
+            'def build_model' not in content):
+            return {
+                'success': False,
+                'error': 'Content missing required H1-Titans components (H1TitansModel, build_model). Write blocked to prevent corruption.'
+            }
+            
         with open(source_file, 'w') as f:
             f.write(content)
         return {
             'success': True,
-            'message': f'Successfully write'
+            'message': f'Successfully wrote H1-Titans architecture to {source_file}'
         }
     except Exception as e:
         return {
@@ -59,22 +74,71 @@ def write_code_file(content: str) -> Dict[str, Any]:
 
 
 @function_tool
-def run_training_script(name: str, script_path: str) -> Dict[str, Any]:
-    """Run the training script and return its output."""
+def run_training_script(experiment_name: str) -> Dict[str, Any]:
+    """Run the training script with the given experiment name."""
+    import os
+    
+    # Change to the project root directory
+    original_dir = os.getcwd()
+    project_root = "/home/nir/ml-tools/ASI-Arch"
+    
     try:
-        subprocess.run(['bash', script_path, name], 
-                      capture_output=True, 
-                      text=True,
-                      check=True)
-        return {
-            'success': True,
-            'error': 'Training script executed successfully'
-        }
-    except subprocess.CalledProcessError as e:
+        os.chdir(project_root)
+        
+        # Clear previous debug file
+        debug_file = "./files/debug/training_error.txt"
+        os.makedirs(os.path.dirname(debug_file), exist_ok=True)
+        
+        # Run the training script with GPU-optimized arguments for RTX 5090
+        result = subprocess.run(
+            ["./venv-asi-arch/bin/python", "./train_architecture.py", 
+             "--batch_size", "16", "--seq_len", "1024", "--max_steps", "500",
+             "--eval_every", "50", "--bf16", "--compile"], 
+            capture_output=True, 
+            text=True,
+            timeout=900  # 15 minute timeout for longer training
+        )
+        
+        if result.returncode == 0:
+            return {
+                'success': True,
+                'output': result.stdout
+            }
+        else:
+            # Write error to debug file
+            with open(debug_file, 'w', encoding='utf-8') as f:
+                f.write(f"Experiment: {experiment_name}\n")
+                f.write(f"Error: {result.stderr}\n")
+                if result.stdout:
+                    f.write(f"Output: {result.stdout}\n")
+            
+            return {
+                'success': False,
+                'error': f"Training failed with return code {result.returncode}. Debug info written to {debug_file}."
+            }
+            
+    except subprocess.TimeoutExpired:
+        with open(debug_file, 'w', encoding='utf-8') as f:
+            f.write(f"Experiment: {experiment_name}\n")
+            f.write(f"Error: Training timed out after 5 minutes\n")
+        
         return {
             'success': False,
-            'error': e.stderr
+            'error': f"Training timed out after 5 minutes. Debug info written to {debug_file}."
         }
+        
+    except Exception as e:
+        with open(debug_file, 'w', encoding='utf-8') as f:
+            f.write(f"Experiment: {experiment_name}\n")
+            f.write(f"Error: Unexpected error: {str(e)}\n")
+        
+        return {
+            'success': False,
+            'error': f"Unexpected error: {str(e)}. Debug info written to {debug_file}."
+        }
+    
+    finally:
+        os.chdir(original_dir)
 
 
 @function_tool

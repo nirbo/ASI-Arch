@@ -116,7 +116,7 @@ class CandidateManager:
             set_tracing_disabled(True)
             
             input_text = model_judger_input(element)
-            result = await log_agent_run("Model Judger", model_judger, input_data=input_text)
+            result = await log_agent_run("Model Judger", model_judger, input_data=input_text, max_turns=30)
             agent_score_raw = float(result.final_output.weighted_final_score)  # Agent returns score 1-10
             # Normalize 1-10 score to 0-1 range to match loss_score and benchmark_score
             agent_score = (agent_score_raw - 1) / 9  # Map 1-10 to 0-1

@@ -85,23 +85,22 @@ class Mamba2Branch(nn.Module):
     def __init__(self, d_model: int, d_state: int = 32, d_conv: int = 4, expand: float = 1.5):
         super().__init__()
         self.d_state = d_state
-        # Projection from model dimension to state dimension
+        self.d_conv = d_conv
+        self.expand = expand
+        self.state_proj = nn.Linear(d_state, d_model, bias=False)
+        self.conv = nn.Conv1d(d_state, d_state, kernel_size=d_conv, padding=d_conv - 1, groups=d_state)
         self.input_proj = nn.Linear(d_model, d_state, bias=False)
-        # State transition (linear) – keeps the operation linear in time
-        self.state_transition = nn.Linear(d_state, d_state, bias=False)
-        # Activation
         self.activation = nn.SiLU()
-        # NOTE: d_conv and expand are kept for API compatibility but not used
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, seq_len, _ = x.shape
-        # Initialize state for each batch element
-        state = torch.zeros(batch, self.d_state, device=x.device)
+        state = self.state_proj.weight.new_zeros(batch, self.d_state)
         outputs = []
         for t in range(seq_len):
             inp = self.input_proj(x[:, t, :])
             state = self.activation(state + inp)
-            state = self.state_transition(state)
+            conv_out = self.conv(state.unsqueeze(-1)).squeeze(-1)
+            state = conv_out
             outputs.append(state)
         out = torch.stack(outputs, dim=1)
         return out

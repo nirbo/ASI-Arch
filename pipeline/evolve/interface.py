@@ -8,47 +8,41 @@ from utils.agent_logger import log_agent_run
 
 async def evolve(context: str) -> Tuple[str, str]:
     for attempt in range(Config.MAX_RETRY_ATTEMPTS):
-        with open(Config.SOURCE_FILE, 'r') as f:
-            original_source = f.read()
-            
         name, motivation = await gen(context)
         
         if await check_code_correctness(motivation):
             return name, motivation
 
-        with open(Config.SOURCE_FILE, 'w') as f:
-            f.write(original_source)
         print("Try new motivations")
     return "Failed", "evolve error"
     
 async def gen(context: str) -> Tuple[str, str]:
-    # Save original file content
-    with open(Config.SOURCE_FILE, 'r') as f:
-        original_source = f.read()
-        
     repeated_result = None
     motivation = None
     
     for attempt in range(Config.MAX_RETRY_ATTEMPTS):
         try:
-            # Restore original file
-            with open(Config.SOURCE_FILE, 'w') as f:
-                f.write(original_source)
             
             # Use different prompt based on whether it's repeated
             plan = None
             if attempt == 0:
                 input = Planner_input(context)
-                plan = await log_agent_run("planner", planner, input)
+                plan = await log_agent_run("planner", planner, input, max_turns=30)
             else:
-                repeated_context = await get_repeated_context(repeated_result.repeated_index)
+                if repeated_result is not None and hasattr(repeated_result, 'repeated_index'):
+                    repeated_context = await get_repeated_context(repeated_result.repeated_index)
+                else:
+                    repeated_context = "No repeated context available due to motivation checker failure."
                 input = Deduplication_input(context, repeated_context)
-                plan = await log_agent_run("deduplication", deduplication, input)
+                plan = await log_agent_run("deduplication", deduplication, input, max_turns=30)
                 
             name, motivation = plan.final_output.name, plan.final_output.motivation
             
             repeated_result = await check_repeated_motivation(motivation)
-            if repeated_result.is_repeated:
+            if repeated_result is None:
+                print(f"Attempt {attempt + 1}: Motivation checker returned None, treating as non-repeated")
+                return name, motivation
+            elif repeated_result.is_repeated:
                 print(f"Attempt {attempt + 1}: Motivation repeated, index is {repeated_result.repeated_index}")
                 if attempt == Config.MAX_RETRY_ATTEMPTS - 1:
                     raise Exception("Maximum retry attempts reached, unable to generate non-repeated motivation")
@@ -72,7 +66,7 @@ async def check_code_correctness(motivation) -> bool:
                 "code_checker",
                 code_checker,
                 CodeChecker_input(motivation=motivation),
-                max_turns=100
+                max_turns=30
             )
             
             if code_checker_result.final_output.success:
@@ -94,12 +88,21 @@ async def check_code_correctness(motivation) -> bool:
             return False
 
 async def check_repeated_motivation(motivation: str):
-    client = create_client()
-    similar_elements = client.search_similar_motivations(motivation)
-    context = similar_motivation_context(similar_elements)
-    input = Motivation_checker_input(context, motivation)
-    repeated_result = await log_agent_run("motivation_checker", motivation_checker, input)
-    return repeated_result.final_output
+    try:
+        client = create_client()
+        similar_elements = client.search_similar_motivations(motivation)
+        context = similar_motivation_context(similar_elements)
+        input = Motivation_checker_input(context, motivation)
+        repeated_result = await log_agent_run("motivation_checker", motivation_checker, input, max_turns=30)
+        
+        if repeated_result is None or repeated_result.final_output is None:
+            print("Warning: Motivation checker returned None, assuming non-repeated")
+            return None
+            
+        return repeated_result.final_output
+    except Exception as e:
+        print(f"Error in motivation checker: {e}, assuming non-repeated")
+        return None
 
 
 def similar_motivation_context(similar_elements: list) -> str:

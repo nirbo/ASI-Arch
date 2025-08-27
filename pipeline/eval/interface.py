@@ -46,7 +46,8 @@ async def run_training(name: str, motivation: str) -> Tuple[bool, str]:
                 debug_result = await log_agent_run(
                     "debugger",
                     debugger,
-                    Debugger_input(motivation, previous_error)
+                    Debugger_input(motivation, previous_error),
+                    max_turns=30
                 )
                 
                 changes_made = debug_result.final_output.changes_made
@@ -55,9 +56,10 @@ async def run_training(name: str, motivation: str) -> Tuple[bool, str]:
             train_result = await log_agent_run(
                 "trainer",
                 trainer,
-                f"""Please run the training script:
-                1. Execute bash {Config.BASH_SCRIPT} with parameter: {name}
-                2. Only return success=True if script exits with code 0"""
+                f"""Please run training for experiment: {name}
+                Call run_training_script with experiment name: {name}
+                Only return success=True if training completes without errors.""",
+                max_turns=30
             )
             
             if train_result.final_output.success:
@@ -77,7 +79,7 @@ async def run_training(name: str, motivation: str) -> Tuple[bool, str]:
                     previous_error = f"Training failed. Debug info:\n{debug_content}"
                 except Exception as e:
                     previous_error = (
-                        f"Training failed. Cannot read debug file {Config.DEBUG_FILE}: {str(e)}"
+                        f"Training failed. Cannot read debug file {os.path.abspath(Config.DEBUG_FILE)}: {str(e)}"
                     )
                 
                 print(f"Training failed for {name} (attempt {attempt + 1}): {previous_error}")
