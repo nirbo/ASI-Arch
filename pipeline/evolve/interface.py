@@ -1,10 +1,13 @@
 from .prompt import Planner_input, Motivation_checker_input, Deduplication_input, CodeChecker_input
 from .model import planner, motivation_checker, deduplication, code_checker
-from agents import exceptions, set_tracing_disabled
+from agents import exceptions, set_tracing_disabled, Runner
 from typing import List, Tuple
 from config import Config
 from database.mongo_database import create_client
 from utils.agent_logger import log_agent_run
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def evolve(context: str) -> Tuple[str, str]:
     for attempt in range(Config.MAX_RETRY_ATTEMPTS):
@@ -27,7 +30,25 @@ async def gen(context: str) -> Tuple[str, str]:
             plan = None
             if attempt == 0:
                 input = Planner_input(context)
-                plan = await log_agent_run("planner", planner, input, max_turns=30)
+                # logger.info(f"🔧 Starting planner execution (attempt {attempt + 1})")
+                # logger.info(f"🔧 Context length: {len(context)} chars")
+                try:
+                    # logger.info(f"🔧 About to call planner directly (bypassing log_agent_run)")
+                    import asyncio
+                    # Test direct planner call to see if log_agent_run is the issue  
+                    plan = await asyncio.wait_for(
+                        Runner.run(planner, input=input),
+                        timeout=300  # 5 minute timeout
+                    )
+                    # logger.info(f"🔧 Direct planner call completed successfully")
+                    # logger.info(f"🔧 Plan output: {plan}")
+                except asyncio.TimeoutError:
+                    logger.error(f"🔧 Planner execution timed out after 5 minutes")
+                    raise Exception("Planner execution timed out")
+                except Exception as e:
+                    # logger.error(f"🔧 Planner execution failed: {e}")
+                    # logger.error(f"🔧 Exception type: {type(e)}")
+                    raise
             else:
                 if repeated_result is not None and hasattr(repeated_result, 'repeated_index'):
                     repeated_context = await get_repeated_context(repeated_result.repeated_index)

@@ -1,241 +1,133 @@
-# -*- coding: utf-8 -*-
-"""Falcon‑H1 + Mamba2 + Titans hybrid architecture.
-
-This implementation focuses on the evolution of the Titans memory
-integration from the original MAG variant to a MAC (memory‑as‑context)
-variant, combined with a Concat+Proj mixer.  The architecture keeps the
-original API (`forward(self, input_ids, write_mem=False)`) and satisfies
-the constraints:
-
-* Sub‑quadratic complexity – linear attention and linear‑time SSM.
-* Causal masking – no leakage of future tokens.
-* Batch‑independent operations.
-* Memory writes only during evaluation (`write_mem=True` and
-  `not self.training`).
-
-The code is intentionally concise while still demonstrating the key
-ideas of the research brief.
-"""
-
 from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Optional
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+from fla.modules import RMSNorm
+from fla.ops import delta_rule_chunkwise
+from fla.modules.l2norm import l2norm
+from fla.models.utils import register_model
 
-# ---------------------------------------------------------------------------
-# Helper utilities
-# ---------------------------------------------------------------------------
-
-def causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
-    """Return a causal mask of shape (seq_len, seq_len)."""
-    return torch.tril(torch.ones(seq_len, seq_len, device=device))
-
-# ---------------------------------------------------------------------------
-# Memory module – MAC variant
-# ---------------------------------------------------------------------------
-@dataclass
-class TitansMemoryConfig:
-    num_slots: int = 32
-    d_k: int = 64
-    d_v: int = 64
-    decay: float = 0.999
-
-class TitansMemory(nn.Module):
-    def __init__(self, cfg: TitansMemoryConfig):
-        super().__init__()
-        self.cfg = cfg
-        # Slots are registered as buffers so they are part of the state
-        self.register_buffer("slots_k", torch.randn(cfg.num_slots, cfg.d_k))
-        self.register_buffer("slots_v", torch.randn(cfg.num_slots, cfg.d_v))
-        self.decay = cfg.decay
-
-    def forward(self, queries: torch.Tensor, write: bool = False) -> torch.Tensor:
-        """Return a context vector for each token.
-
-        Args:
-            queries: Tensor of shape (batch, seq_len, d_k)
-            write: Whether to perform an EMA update of the slots.
-        Returns:
-            context: Tensor of shape (batch, seq_len, d_v)
-        """
-        batch, seq_len, d_k = queries.shape
-        # Compute similarity between queries and slots
-        sim = torch.einsum("bld,md->blm", queries, self.slots_k)
-        attn = F.softmax(sim, dim=-1)
-        context = torch.einsum("blm,md->bld", attn, self.slots_v)
-
-        if write and not self.training:
-            # Update slots with EMA of the context weighted by similarity
-            slot_updates_k = torch.einsum("blm,bld->md", attn, queries)
-            self.slots_k.mul_(self.decay).add_(slot_updates_k, alpha=1 - self.decay)
-            slot_updates_v = torch.einsum("blm,bld->md", attn, context)
-            self.slots_v.mul_(self.decay).add_(slot_updates_v, alpha=1 - self.decay)
-
-        return context
-
-# ---------------------------------------------------------------------------
-# Simple Mamba2 branch (linear‑time SSM)
-# ---------------------------------------------------------------------------
-class Mamba2Branch(nn.Module):
-    def __init__(self, d_model: int, d_state: int = 32, d_conv: int = 4, expand: float = 1.5):
-        super().__init__()
-        self.d_state = d_state
-        # Projection from model dimension to state dimension
-        self.input_proj = nn.Linear(d_model, d_state, bias=False)
-        # State transition (linear) – keeps the operation linear in time
-        self.state_transition = nn.Linear(d_state, d_state, bias=False)
-        # Activation
-        self.activation = nn.SiLU()
-        # NOTE: d_conv and expand are kept for API compatibility but not used
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch, seq_len, _ = x.shape
-        # Initialize state for each batch element
-        state = torch.zeros(batch, self.d_state, device=x.device)
-        outputs = []
-        for t in range(seq_len):
-            inp = self.input_proj(x[:, t, :])
-            state = self.activation(state + inp)
-            state = self.state_transition(state)
-            outputs.append(state)
-        out = torch.stack(outputs, dim=1)
-        return out
-
-# ---------------------------------------------------------------------------
-# Linear attention branch – MAC style (context injected)
-# ---------------------------------------------------------------------------
-class AttnBranch(nn.Module):
-    def __init__(self, d_model: int, num_heads: int = 8):
-        super().__init__()
+class Config:
+    def __init__(self, d_model=768, num_heads=12, expand_k=2.0, expand_v=2.0, use_beta=True, use_gate=True, mem_slots=64, mem_dim=64):
         self.d_model = d_model
         self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
-        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
-        self.q_proj = nn.Linear(d_model, d_model, bias=False)
-        self.k_proj = nn.Linear(d_model, d_model, bias=False)
-        self.v_proj = nn.Linear(d_model, d_model, bias=False)
-        self.out_proj = nn.Linear(d_model, d_model, bias=False)
-        # Non‑negative kernel for linear attention
-        self.kernel = lambda x: F.elu(x) + 1
+        self.head_k = (d_model * expand_k) // num_heads
+        self.head_v = (d_model * expand_v) // num_heads
+        self.expand_k = expand_k
+        self.expand_v = expand_v
+        self.qk_activation = 'l2'
+        self.qk_norm = 'l2'
+        self.use_beta = use_beta
+        self.use_gate = use_gate
+        self.mem_slots = mem_slots
+        self.mem_dim = mem_dim
+        self.qk_activation = 'l2'
+        self.qk_norm = 'l2'
 
-    def forward(self, x: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
-        # x: (batch, seq_len, d_model)
-        batch, seq_len, _ = x.shape
-        # Inject context into queries and keys
-        q = self.q_proj(x + context)
-        k = self.k_proj(x + context)
-        v = self.v_proj(x)
-        # Reshape for multi‑head
-        q = rearrange(q, "b s (h d) -> b h s d", h=self.num_heads)
-        k = rearrange(k, "b s (h d) -> b h s d", h=self.num_heads)
-        v = rearrange(v, "b s (h d) -> b h s d", h=self.num_heads)
-        # Apply kernel
-        qk = self.kernel(q)
-        kk = self.kernel(k)
-        # Linear attention with causal cumulative sums
-        kv = kk * v  # (b, h, s, d)
-        cum_kv = torch.cumsum(kv, dim=2)
-        cum_k = torch.cumsum(kk, dim=2)
-        # Compute attention output with element‑wise division
-        out = (qk * cum_kv) / (qk * cum_k + 1e-6)
-        out = rearrange(out, "b h s d -> b s (h d)")
-        out = self.out_proj(out)
-        return out
-
-# ---------------------------------------------------------------------------
-# Mixer – Concat+Proj
-# ---------------------------------------------------------------------------
-class ConcatProjMixer(nn.Module):
-    def __init__(self, d_model: int, d_hidden: int = 512):
-        super().__init__()
-        # The mixer concatenates three branch outputs each of size d_model.
-        # The projection therefore expects an input of size 3 * d_model.
-        self.proj = nn.Linear(3 * d_model, d_model)
-
-    def forward(self, attn_out: torch.Tensor, ssm_out: torch.Tensor, mem_out: torch.Tensor) -> torch.Tensor:
-        concat = torch.cat([attn_out, ssm_out, mem_out], dim=-1)
-        return self.proj(concat)
-
-# ---------------------------------------------------------------------------
-# H1‑Titans Block
-# ---------------------------------------------------------------------------
-class H1TitansBlock(nn.Module):
-    def __init__(self, cfg: dict):
-        super().__init__()
-        d_model = cfg["d_model"]
-        num_heads = cfg.get("num_heads", 8)
-        d_state = cfg.get("d_state", 32)
-        self.attn = AttnBranch(d_model, num_heads)
-        self.mamba = Mamba2Branch(d_model, d_state, cfg.get("d_conv", 4), cfg.get("expand", 1.5))
-        self.memory = TitansMemory(TitansMemoryConfig(
-            num_slots=cfg.get("num_slots", 32),
-            d_k=d_model // num_heads,
-            d_v=d_model // num_heads,
-        ))
-        self.mixer = ConcatProjMixer(d_model)
-        self.norm = nn.LayerNorm(d_model)
-        # Projection to bring memory context to d_model
-        self.context_proj = nn.Linear(d_model // num_heads, d_model)
-        # Projection of queries for memory (d_k dimensional)
-        self.mem_q_proj = nn.Linear(d_model, d_model // num_heads, bias=False)
-        # Project SSM output to d_model for mixing
-        self.ssm_proj = nn.Linear(d_state, d_model)
-
-    def forward(self, x: torch.Tensor, write_mem: bool = False) -> torch.Tensor:
-        # x: (batch, seq_len, d_model)
-        mem_queries = self.mem_q_proj(x)
-        context = self.memory(mem_queries, write=write_mem)  # (batch, seq_len, d_v)
-        context_proj = self.context_proj(context)
-        attn_out = self.attn(x, context_proj)
-        ssm_out = self.mamba(x)
-        ssm_out_proj = self.ssm_proj(ssm_out)
-        mem_out = context_proj  # reuse projected context as memory branch output
-        mixed = self.mixer(attn_out, ssm_out_proj, mem_out)
-        out = self.norm(mixed + x)
-        return out
-
-# ---------------------------------------------------------------------------
-# H1‑Titans Model
-# ---------------------------------------------------------------------------
 class H1TitansModel(nn.Module):
-    def __init__(self, vocab_size: int, d_model: int = 512, num_layers: int = 6, **kwargs):
+    def __init__(self, config: Config, vocab_size: int):
         super().__init__()
-        self.embed = nn.Embedding(vocab_size, d_model)
-        cfg = {
-            "d_model": d_model,
-            "num_heads": kwargs.get("num_heads", 8),
-            "d_state": kwargs.get("d_state", 32),
-            "d_conv": kwargs.get("d_conv", 4),
-            "expand": kwargs.get("expand", 1.5),
-            "num_slots": kwargs.get("num_slots", 32),
-        }
-        self.blocks = nn.ModuleList([H1TitansBlock(cfg) for _ in range(num_layers)])
-        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+        self.embed = nn.Embedding(vocab_size, config.d_model)
+        self.blocks = nn.ModuleList([H1TitansBlock(config) for _ in range(12)])
+        self.norm = RMSNorm(config.d_model)
+        self.output = nn.Linear(config.d_model, vocab_size, bias=False)
+        
+    def forward(self, input_ids, write_mem=False):
+        x = self.embed(input_ids)
+        for block in self.blocks:
+            x = block(x, write_mem)
+        x = self.norm(x)
+        return self.output(x)
 
-    def forward(self, input_ids: torch.Tensor, write_mem: bool = False) -> torch.Tensor:
-        x = self.embed(input_ids)  # (batch, seq_len, d_model)
-        for blk in self.blocks:
-            x = blk(x, write_mem=write_mem)
-        logits = self.lm_head(x)
-        return logits
+class H1TitansBlock(nn.Module):
+    def __init__(self, config: Config):
+        super().__init__()
+        self.attn = Attention(config)
+        self.mem = Memory(config)
+        self.mixer = nn.Linear(2 * config.d_model, config.d_model, bias=False)
+        if config.use_gate:
+            self.gate = nn.Linear(config.d_model, config.d_model)
+        self.norm = RMSNorm(config.d_model)
+        
+    def forward(self, x, write_mem):
+        a = self.attn(x)
+        m = self.mem(x, write_mem)
+        combined = torch.cat([a, m], dim=-1)
+        combined = self.mixer(combined)
+        if hasattr(self, 'gate'):
+            combined = F.silu(self.gate(x)) * combined
+        x = x + combined
+        return self.norm(x)
 
-# ---------------------------------------------------------------------------
-# Build function
-# ---------------------------------------------------------------------------
-def build_model(cfg: Optional[dict] = None, **kwargs) -> H1TitansModel:
-    if cfg is None:
-        cfg = {}
-    # Extract core arguments and remove them from cfg to avoid duplicates
-    vocab_size = cfg.pop("vocab_size", 50257)
-    d_model = cfg.pop("d_model", 512)
-    num_layers = cfg.pop("num_layers", 6)
-    # Merge remaining cfg with any extra kwargs
-    remaining_kwargs = {**cfg, **kwargs}
-    return H1TitansModel(vocab_size, d_model, num_layers, **remaining_kwargs)
+class Attention(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.q_proj = nn.Linear(config.d_model, config.head_k * config.num_heads, bias=False)
+        self.k_proj = nn.Linear(config.d_model, config.head_k * config.num_heads, bias=False)
+        self.v_proj = nn.Linear(config.d_model, config.head_v * config.num_heads, bias=False)
+        self.o_proj = nn.Linear(config.head_v * config.num_heads, config.d_model, bias=False)
+        self.config = config
+        if config.use_beta:
+            self.b_proj = nn.Linear(config.d_model, config.num_heads, bias=False)
+        else:
+            self.b_proj = None
+        
+    def forward(self, x):
+        B, T, C = x.size()
+        q = rearrange(self.q_proj(x), 'b t (h d) -> b h t d', h=self.config.num_heads)
+        k = rearrange(self.k_proj(x), 'b t (h d) -> b h t d', h=self.config.num_heads)
+        v = rearrange(self.v_proj(x), 'b t (h d) -> b h t d', h=self.config.num_heads)
+        
+        q, k = q.to(torch.bfloat16), k.to(torch.bfloat16)
+        if self.config.qk_norm == 'l2':
+            q = l2norm(q).to(q.dtype)
+            k = l2norm(k).to(k.dtype)
+        
+        beta = F.sigmoid(self.b_proj(x)) if self.b_proj else torch.ones(B, T, self.config.num_heads, device=x.device)
+        beta = rearrange(beta, 'b t h -> b h t 1')
+        
+        q = rearrange(q, 'b h t d -> (b h) t d')
+        k = rearrange(k, 'b h t d -> (b h) t d')
+        v = rearrange(v, 'b h t d -> (b h) t d')
+        
+        o, _ = delta_rule_chunkwise(q, k, v, beta, chunk_size=32)
+        o = rearrange(o, '(b h) t d -> b t h d', b=B, h=self.config.num_heads).contiguous()
+        o = o.reshape(B, T, -1)
+        o = self.o_proj(o)
+        return o
 
-# End of file
+class Memory(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.slots = nn.Parameter(torch.randn(config.mem_slots, config.mem_dim))
+        self.q_proj = nn.Linear(config.d_model, config.mem_dim, bias=False)
+        self.v_proj = nn.Linear(config.d_model, config.mem_dim, bias=False)
+        self.out_proj = nn.Linear(config.mem_dim, config.d_model, bias=False)
+        self.norm = RMSNorm(config.mem_dim)
+        self.decay = 0.999
+        
+    def forward(self, x, write):
+        B, T, C = x.size()
+        q = self.norm(self.q_proj(x))  # (B, T, D)
+        attn = F.softmax(q @ self.slots.T, dim=-1)  # (B*T, slots, )
+        read = attn @ self.slots  # (B*T, D)
+        read = read.reshape(B, T, -1)  # (B, T, D)
+        out = self.out_proj(read) + x
+        if write and not self.training:
+            with torch.no_grad():
+                v = self.v_proj(x).reshape(-1, self.slots.size(1))  # (B*T, D) -> (B*T, slots)
+                q_update = self.q_proj(x).reshape(-1, self.slots.size(1))  # (B*T, D) -> (B*T, slots)
+                attn_update = F.softmax(q_update @ self.slots.T, dim=-1)  # (B*T, slots, )
+                # Update slots: EMA
+                self.slots *= self.decay
+                self.slots += (1 - self.decay) * (attn_update.T @ v).T
+        return out
+
+@register_model
+def build_model(vocab_size, d_model=768, num_heads=12, **kwargs):
+    config = Config(d_model, num_heads, **kwargs)
+    return H1TitansModel(config, vocab_size)
+
+# Example usage:
+# model = build_model(vocab_size=50257, d_model=768, num_heads=12, use_beta=True, use_gate=True, mem_slots=64, mem_dim=64)

@@ -1,6 +1,7 @@
 import asyncio
 
 from agents import set_default_openai_api, set_default_openai_client, set_tracing_disabled
+import logging
 from openai import AsyncOpenAI
 
 from analyse import analyse
@@ -12,7 +13,8 @@ from utils.agent_wrapper import apply_global_json_sanitization
 from tools.provider import get_global_provider
 
 # Apply global JSON sanitization to prevent Unicode parsing errors
-apply_global_json_sanitization()
+# Temporarily disabled due to server crashes
+# apply_global_json_sanitization()
 
 # Initialize client using generic provider connector
 provider = get_global_provider()
@@ -20,13 +22,18 @@ model_params = provider.get_model_params()
 
 client = AsyncOpenAI(
     api_key=model_params.get("api_key", "dummy"),
-    base_url=model_params.get("base_url", "http://localhost:8080/v1")
+    base_url=model_params.get("base_url", "http://localhost:8080/v1"),
+    timeout=120.0  # 2 minute timeout for longer evolution requests
 )
 
 set_default_openai_client(client)
 set_default_openai_api("chat_completions") 
 
-set_tracing_disabled(True)
+# Enable detailed logging to see model conversations
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.getLogger('httpx').setLevel(logging.WARNING)  # Reduce HTTP request noise
+logging.getLogger('openai').setLevel(logging.WARNING)  # Reduce OpenAI client noise
+set_tracing_disabled(True)  # Disable tracing to avoid OpenAI API calls
 
 
 async def run_single_experiment() -> bool:

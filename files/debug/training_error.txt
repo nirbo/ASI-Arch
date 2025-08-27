@@ -1,31 +1,43 @@
-Experiment: H1-Titans-MAC-Concat
-Error: 2025-08-27 13:15:59.396506: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-08-27 13:15:59.402802: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+Experiment: H1-Titans-MAC-CONCAT+PROJ
+Error: 2025-08-27 14:14:37.870882: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-08-27 14:14:37.877204: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1756318559.410271  403479 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1756318559.413240  403479 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1756318559.418820  403479 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1756318559.418828  403479 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1756318559.418829  403479 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1756318559.418830  403479 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-08-27 13:15:59.420711: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+E0000 00:00:1756322077.884425  526815 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1756322077.887299  526815 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1756322077.892800  526815 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1756322077.892810  526815 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1756322077.892811  526815 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1756322077.892812  526815 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-08-27 14:14:37.894644: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 AVX_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-usage: train_architecture.py [-h] [--model_config_json MODEL_CONFIG_JSON]
-                             [--model_override MODEL_OVERRIDE]
-                             [--tokenizer TOKENIZER] [--dataset DATASET]
-                             [--dataset_config DATASET_CONFIG]
-                             [--text_column TEXT_COLUMN] [--seq_len SEQ_LEN]
-                             [--batch_size BATCH_SIZE]
-                             [--grad_accum GRAD_ACCUM] [--lr LR]
-                             [--warmup_steps WARMUP_STEPS]
-                             [--max_steps MAX_STEPS] [--eval_every EVAL_EVERY]
-                             [--eval_batches EVAL_BATCHES]
-                             [--save_every SAVE_EVERY] [--out_dir OUT_DIR]
-                             [--seed SEED] [--fp16] [--bf16] [--compile]
-                             [--resume RESUME] [--grad_clip GRAD_CLIP]
-                             [--weight_decay WEIGHT_DECAY]
-                             [--adam_beta1 ADAM_BETA1]
-                             [--adam_beta2 ADAM_BETA2] [--adam_eps ADAM_EPS]
-                             [--disable_mem_writes]
-train_architecture.py: error: unrecognized arguments: --experiment_name H1-Titans-MAC-Concat --epochs 1 --max_length 128 --dataset_size 50 --no_wandb
+/home/nir/ml-tools/ASI-Arch/./train_architecture.py:180: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = torch.cuda.amp.GradScaler(enabled=args.fp16)
+Traceback (most recent call last):
+  File "/home/nir/ml-tools/ASI-Arch/./train_architecture.py", line 252, in <module>
+    main()
+  File "/home/nir/ml-tools/ASI-Arch/./train_architecture.py", line 189, in main
+    xb, yb = next(tr_iter)
+             ^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/./train_architecture.py", line 50, in cycle
+    for b in loader:
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 734, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1516, in _next_data
+    return self._process_data(data, worker_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1551, in _process_data
+    data.reraise()
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/_utils.py", line 769, in reraise
+    raise exception
+TypeError: Caught TypeError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/utils/data/_utils/worker.py", line 349, in _worker_loop
+    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/nir/ml-tools/ASI-Arch/venv-asi-arch/lib/python3.12/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+            ~~~~~~~~~~~~^^^^^
+TypeError: 'TextSampler' object is not subscriptable
+
 

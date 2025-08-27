@@ -37,6 +37,18 @@ class DataElement:
         )
         summary_result = summary.final_output.experience
 
+        # Extract key architecture details without full code to preserve research insights
+        # while keeping context manageable
+        program_lines = self.program.split('\n')
+        key_lines = []
+        
+        # Extract class definitions and key architectural elements
+        for line in program_lines[:50]:  # First 50 lines usually contain key architecture info
+            if any(keyword in line.lower() for keyword in ['class ', 'def forward', 'def __init__', 'titans', 'memory', 'attention']):
+                key_lines.append(line.strip())
+        
+        architecture_summary = '\n'.join(key_lines[:10])  # Max 10 key lines
+        
         return f"""## EXPERIMENTAL EVIDENCE PORTFOLIO
 
 ### Experiment: {self.name}
@@ -46,9 +58,10 @@ class DataElement:
 **Training Progression**: {self.result["train"]}
 **Evaluation Results**: {self.result["test"]}
 
-#### Implementation Analysis
+#### Key Architecture Elements
 ```python
-{self.program}
+{architecture_summary}
+... [Full implementation available but truncated for context efficiency]
 ```
 
 #### Synthesized Experimental Insights
