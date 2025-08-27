@@ -1,155 +1,151 @@
 def Planner_input(context: str) -> str:
-    return f"""# Neural Architecture Evolution Mission
+    return f"""# Falcon-H1 + Titans Memory Fusion Research Mission
 
-## EXPERIMENTAL CONTEXT & HISTORICAL EVIDENCE
+## EXPERIMENTAL CONTEXT & ARCHITECTURAL FOUNDATION
 {context}
 
-## ARCHITECTURE EVOLUTION OBJECTIVE
-Your mission is to create a breakthrough neural architecture that addresses critical performance limitations identified through experimental evidence while integrating cutting-edge research insights. Design and implement an innovative architecture that maintains computational efficiency while achieving superior cognitive capabilities.
+## CURRENT BASE ARCHITECTURE: Falcon-H1 + Mamba2 + Titans-MAG
+You are working with a **hybrid parallel-branch architecture** that fuses:
+- **Falcon-H1 style**: Parallel attention + SSM branches with learnable branch weights
+- **Mamba2 SSM**: State-space model for linear-time sequential processing 
+- **Titans-MAG Memory**: Persistent key-value slots with conservative EMA updates
 
-## SYSTEMATIC EVOLUTION METHODOLOGY
+**Core Architecture Components:**
+- `H1TitansBlock`: Three parallel branches (attention, mamba2, titans memory)
+- `AttnBranch`: Standard attention with RoPE positioning, causal masking
+- `Mamba2Branch`: SSM with fallback to SimpleSSM if mamba_ssm unavailable  
+- `TitansMAG`: Persistent memory with eval-only writes, batch-agnostic reads
+- **Mixer**: Parallel sum with learnable branch weights: `w[0]*attention + w[1]*ssm + w[2]*memory`
 
-### PHASE 1: Evidence-Based Analysis Framework
+## RESEARCH OBJECTIVE: TITANS INTEGRATION OPTIMIZATION
 
-#### 1.1 Architecture Forensics
+Your mission is to **evolve the Titans memory integration** within the Falcon-H1 hybrid framework while preserving:
+- **Sub-quadratic complexity** (linear attention, linear-time SSM)
+- **Causal correctness** with no information leakage
+- **Batch-size independence** across all operations
+- **Training stability** with proper write policies
+
+### Primary Evolution Targets:
+1. **Memory Variants**: MAG (default) → MAC (memory-as-context) → MAL (memory-as-layer)
+2. **Mixer Strategies**: SUM (default) → CONCAT+PROJ → GATED_FUSION → WEIGHTED_ROUTING
+3. **Mamba2 Tuning**: Adjust d_state, d_conv, expand parameters for optimal SSM performance
+4. **Write Policies**: Eval-only (default) → train+eval → learnable gating → adaptive frequency
+
+## EVOLUTION METHODOLOGY
+
+### PHASE 1: Architecture Analysis & Bottleneck Identification
 **Current State Assessment:**
-- Use `read_code_file` to examine existing architectural implementations
-- Map computational mechanisms, design patterns, and information flow
-- Identify core algorithmic approaches and their theoretical foundations
-- Document interface constraints and compatibility requirements
+- Use `read_code_file` to examine `pipeline/current_architecture.py`
+- Map information flow: Attention → SSM → Memory → Branch Mixing
+- Identify performance limitations from experimental evidence
+- Analyze branch weight dynamics and utilization patterns
 
-#### 1.2 Performance Pattern Recognition  
-**Historical Evidence Analysis:**
-- **Training Dynamics Diagnosis**: Extract optimization challenges from loss curves and convergence patterns
-- **Task-Specific Performance Profiling**: Identify capability gaps across cognitive domains (reasoning, memory, comprehension)
-- **Bottleneck Identification**: Pinpoint architectural elements limiting performance vs. those enabling strengths
-- **Cross-Architecture Comparison**: Analyze performance patterns across different experimental variants
+**Critical Constraint Verification:**
+- **Forward Signature**: `forward(self, input_ids, write_mem=False)` must remain unchanged
+- **Causal Masking**: All branches must respect causal constraints
+- **Complexity Bounds**: Maintain O(N) or O(N log N) throughout
+- **Memory Writes**: Must be disabled during training (`write_mem=False` in training)
 
-#### 1.3 Research Integration Strategy
-**Theoretical Foundation Building:**
-- Map research insights to observed performance limitations
-- Identify specific theoretical principles addressing architectural weaknesses  
-- Synthesize multiple research findings for comprehensive enhancement opportunities
-- Validate theoretical applicability through experimental evidence correlation
+### PHASE 2: Targeted Innovation Design
 
-### PHASE 2: Innovation Design Framework
+**Titans Memory Evolution Priorities:**
+1. **MAG → MAC Transition**: Convert memory-as-gates to memory-as-context
+   - Replace gated memory reads with contextual memory injection
+   - Maintain persistent slot updates with EMA decay
+   - Preserve batch-agnostic operation
+   
+2. **MAC → MAL Exploration**: Develop memory-as-layer variants
+   - Integrate memory as dedicated processing layer
+   - Design memory-aware routing between attention/SSM branches
+   - Maintain sub-quadratic complexity constraints
 
-#### 2.1 Targeted Performance Engineering
-**Gap-Specific Solutions:**
-- Design architectural modifications targeting the most critical performance bottlenecks
-- Create mechanisms leveraging research insights for problematic capability domains
-- Balance multiple improvement objectives while maintaining architectural coherence
-- Ensure modifications address root causes rather than symptoms
+3. **Mixer Innovation**: Beyond parallel sum
+   - **CONCAT+PROJ**: Concatenate branch outputs, project to d_model
+   - **GATED_FUSION**: Learnable gates for branch combination  
+   - **WEIGHTED_ROUTING**: Dynamic routing based on input characteristics
 
-#### 2.2 Theoretical Grounding Protocol
-**Research-Driven Design:**
-- Ground all modifications in validated theoretical principles
-- Ensure mathematical and computational justification for proposed changes
-- Verify alignment with established research findings and best practices
-- Create novel combinations of insights for breakthrough potential
+**Mamba2 SSM Optimization:**
+- **d_state**: Experiment with 32, 64, 128 for different memory capacities
+- **d_conv**: Try 3, 4, 7 for different local context windows
+- **expand**: Test 1.5, 2, 4 for different inner dimension scaling
 
-#### 2.3 Efficiency Optimization Standards
-**Computational Constraints:**
-- Design using chunked computation patterns for scalability
-- Maintain sub-quadratic O(N log N) complexity throughout
-- Optimize memory usage through efficient processing strategies
-- Preserve performance gains within strict complexity bounds
+### PHASE 3: Implementation Excellence
 
-### PHASE 3: Implementation Excellence Protocol
+**Code Implementation Standards:**
+- **Class Structure**: Maintain `H1TitansModel` and `H1TitansBlock` names
+- **Interface Preservation**: Keep exact `forward(input_ids, write_mem=False)` signature
+- **Configuration**: Extend `H1TitansCfg` with new parameters having sensible defaults
+- **Memory Safety**: Ensure all new operations are batch-size independent
 
-#### 3.1 Architecture Implementation Standards
-**Code Development Requirements:**
-- Use `write_code_file` to implement the complete evolved architecture
-- Preserve interface compatibility (forward function signatures, __init__ **kwargs)
-- Add new parameters with sensible defaults (enabled by default for new features)
-- Remove or refactor existing features to prevent architectural bloat
-- Implement proper causal masking and information flow constraints
+**Titans-Specific Constraints:**
+- **Write Policy**: Memory writes ONLY during eval (`write_mem=True` and `not self.training`)
+- **Causal Safety**: Memory reads must not leak future information
+- **EMA Updates**: Preserve conservative update rates (decay=0.999 default)
+- **Slot Management**: Maintain fixed slot count with similarity-based addressing
 
-#### 3.2 Quality Assurance Framework
-**Technical Excellence Standards:**
-- Maintain @torch.compile decorators for computational optimization
-- Preserve chunked processing patterns throughout the architecture
-- Ensure causal constraints prevent any information leakage
-- Verify sub-quadratic complexity in all implemented operations
+**Critical Preservation Requirements:**
+- Sub-quadratic complexity in ALL operations
+- Causal masking integrity across all branches  
+- Batch-size agnostic tensor operations
+- Forward pass signature compatibility
+- RoPE positioning in attention branch
+- Mamba2 with SimpleSSM fallback support
 
-#### 3.3 Documentation and Justification
-**Innovation Communication:**
-- Create comprehensive motivation explaining evolution rationale
-- Connect experimental evidence to theoretical insights and implementation decisions
-- Justify expected improvements based on research findings
-- Provide clear reasoning for all architectural design choices
+## INNOVATION FOCUS AREAS
 
-## TECHNICAL IMPLEMENTATION SPECIFICATIONS
+### Memory Integration Variants:
+**MAG (Memory-As-Gates)** - Current Implementation:
+```python
+# Current: Gated memory output added to branch mix
+m = self.mem(h, enable_write=write_mem)
+y = w[0]*a + w[1]*s + w[2]*m  # Parallel sum
+```
 
-### Critical Preservation Requirements
-- **Class Structure**: Maintain DeltaNet class name and inheritance hierarchy
-- **Interface Stability**: Preserve exact forward function signature compatibility
-- **Parameter Compatibility**: Support **kwargs in __init__ for extensibility
-- **Compilation Strategy**: Apply @torch.compile selectively to core computational functions only
-- **Dimensional Consistency**: Maintain d_model and core parameter structure
+**MAC (Memory-As-Context)** - Evolution Target:
+```python  
+# Evolution: Memory provides context for other branches
+mem_context = self.mem.get_context(h)
+a = self.attn(h, context=mem_context)
+s = self.ssm(h, context=mem_context)
+```
 
-### Implementation Quality Standards
-- **Chunked Processing**: All sequence operations must utilize fixed-size chunking
-- **Causal Integrity**: Implement strict causal constraints in attention-like mechanisms
-- **Complexity Bounds**: Ensure O(N log N) or better for all operations
-- **Memory Efficiency**: Design for optimal memory usage with chunked patterns
-- **Compilation Safety**: Avoid @torch.compile on utility functions to prevent conflicts
+**MAL (Memory-As-Layer)** - Advanced Target:
+```python
+# Evolution: Memory as processing layer
+h = self.mem.process_layer(h, enable_write=write_mem)
+# Then attention/SSM process memory-enhanced representations
+```
 
-### MANDATORY: Tensor Operations Robustness
-- **einops.rearrange() Requirement**: Replace ALL .view()/.reshape() with einops.rearrange()
-- **Dynamic Dimension Handling**: Never manually calculate dimensions - use einops inference
-- **Batch Size Agnostic**: All operations must work with ANY batch size
-- **Runtime Shape Extraction**: Get dimensions from tensor.shape at runtime, not config
-- **Adaptive Processing**: Design for actual tensor dimensions, not predetermined values
+### Mixer Evolution Targets:
+- **Learnable Branch Routing**: Dynamic weights based on input characteristics
+- **Hierarchical Fusion**: Multi-stage branch combination strategies  
+- **Attention-Guided Mixing**: Use attention patterns to guide branch weighting
 
-### Cross-Environment Robustness Standards
-- **Universal Compatibility**: Identical performance across training/evaluation/inference
-- **Memory Adaptation**: Graceful handling of varying memory constraints
-- **Shape Tolerance**: Robust operation with varying input dimensions
-- **Resource Awareness**: Automatic adaptation to available computational resources
+## IMPLEMENTATION DELIVERABLES
 
-## INNOVATION TARGET DOMAINS
+### PRIMARY: Complete Working Code
+**Using `write_code_file` create:**
+- Complete `current_architecture.py` with evolved architecture
+- Maintain all existing entrypoints: `build_model()`, `architecture_spec()`, `get_seed_candidate()`
+- Preserve sanity check functionality with proper shape verification
 
-### Primary Capability Enhancement Areas
-- **Extended Context Memory**: Revolutionary long-range dependency handling
-- **Multi-Scale Information Integration**: Enhanced temporal and semantic scale processing
-- **Adaptive Computational Mechanisms**: Dynamic adjustment based on input characteristics
-- **Efficiency-Performance Optimization**: Superior capabilities within complexity constraints
-- **Cognitive Task Performance**: Breakthrough improvements in reasoning and comprehension
-- **Environmental Robustness**: Consistent performance across execution contexts
-- **Resource Efficiency**: Optimal adaptation to computational constraints
+### SECONDARY: Evolution Documentation  
+**JSON Output Format:**
+```json
+{{
+  "name": "H1-Titans-[VARIANT]",
+  "motivation": "Clear explanation of specific evolution and expected benefits focusing on Titans integration improvements within Falcon-H1 framework"
+}}
+```
 
-## DELIVERABLE SPECIFICATIONS
+## SUCCESS CRITERIA
+1. **Implementation Excellence**: Working code with evolved Titans integration
+2. **Constraint Adherence**: All Falcon-H1 + Titans constraints preserved
+3. **Innovation Depth**: Meaningful evolution beyond current MAG implementation
+4. **Performance Targeting**: Changes address identified architectural bottlenecks
+5. **Stability Maintenance**: Proper memory write policies and causal constraints
 
-### PRIMARY DELIVERABLE: Complete Implementation
-**Architecture Code (MANDATORY):**
-- **Implementation Tool**: Use `write_code_file` to create complete working architecture
-- **Innovation Quality**: Embed revolutionary architectural advances in functional code
-- **Constraint Compliance**: Preserve class structure, parameters, and interface compatibility
-- **Technical Standards**: Maintain sub-quadratic complexity, chunked processing, causal constraints
-- **Robustness Implementation**: Use einops.rearrange() universally, ensure batch size independence
+**CRITICAL**: Focus on **Titans memory system evolution** within the hybrid Falcon-H1 framework. This is NOT about creating entirely new architectures but about **optimizing the Titans integration** with attention and Mamba2 branches.
 
-### SECONDARY DELIVERABLE: Design Documentation
-**Architecture Description:**
-- **Naming Convention**: `delta_net_[innovation_identifier]` reflecting core innovations
-- **Motivation Document**: Comprehensive explanation including:
-  - Key architectural innovations and their implementation
-  - Research insights applied and expected performance improvements
-  - Design choice justification based on experimental evidence
-  - Connection between theory, evidence, and implementation
-
-## SUCCESS CRITERIA FRAMEWORK
-
-### Critical Success Factors (Ranked by Priority)
-1. **Implementation Excellence**: Successfully create breakthrough architecture using write_code_file
-2. **Constraint Adherence**: Maintain class name, parameters, and interface compatibility
-3. **Technical Robustness**: Ensure complexity bounds, chunked processing, causal constraints
-4. **Universal Compatibility**: Use einops.rearrange() universally, support any batch size
-5. **Evidence-Based Innovation**: Embed research insights addressing identified limitations
-6. **Performance Targeting**: Implement solutions for specific weakness areas identified
-
-## MISSION EMPHASIS
-Your **PRIMARY OBJECTIVE** is implementing breakthrough architectural code that demonstrates robust performance across all execution environments and batch configurations. Create working innovations that directly address identified performance gaps through research-guided architectural evolution. Documentation serves as secondary validation of implemented innovations.
-
-Begin your evolution process by examining the experimental evidence and identifying the most critical architectural improvement opportunities."""
+Begin by analyzing the experimental evidence to identify the most promising Titans evolution direction."""
 

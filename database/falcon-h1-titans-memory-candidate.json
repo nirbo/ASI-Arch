@@ -1,0 +1,20 @@
+{
+  "type": "architecture",
+  "name": "Falcon-H1+Mamba2+TitansMAG-v0",
+  "summary": "Parallel-sum Attention+Mamba2 with Titans MAG persistent memory. Bootstrap for ASI-Arch.",
+  "spec": {
+    "family": "hybrid_ssm_attention_memory",
+    "mixer": "parallel_sum",
+    "branches": ["attention_sdpa_rope", "mamba2_ssm", "titans_memory_mag"],
+    "mlp": "swiglu",
+    "depth": 12,
+    "dims": {"d_model": 768, "d_mlp": 3072, "n_heads": 12},
+    "mamba2": {"d_state": 64, "d_conv": 4, "expand": 2},
+    "memory": {"slots": 128, "dim": 768, "write_lr": 0.05, "decay": 0.999},
+    "notes": "Matches Falcon-H1's parallel design; Titans memory added as third branch."
+  },
+  "parents": [],
+  "tags": ["seed","hybrid","mamba2","linear-attn","titans-memory"],
+  "metrics": {},
+  "score": null
+}

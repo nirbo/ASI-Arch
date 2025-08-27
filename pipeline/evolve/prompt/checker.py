@@ -9,7 +9,7 @@ def CodeChecker_input(motivation: str) -> str:
 Perform these checks IN ORDER:
 
 ### 1. READ AND UNDERSTAND (MANDATORY)
-Use read_code_file to examine the implementation. Understand what the code is trying to achieve based on the motivation.
+Use read_code_file with the file path "./current_architecture.py" to examine the implementation. This file contains the evolved architecture code that needs to be checked. Understand what the code is trying to achieve based on the motivation.
 
 ### 2. STRICT CHECKS - MUST FIX IF FOUND
 
